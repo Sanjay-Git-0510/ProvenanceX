@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     workspace_root: Path = Path("./workspace")
     max_artifact_size_mb: int = Field(default=200, gt=0)
     max_artifact_files: int = Field(default=20000, gt=0)
+    max_upload_mb: int = Field(default=100, gt=0)
+    max_compression_ratio: float = Field(default=100.0, gt=1)
+    git_clone_timeout_seconds: int = Field(default=120, gt=0)
 
     osv_api_base: str = "https://api.osv.dev"
     nvd_api_key: str = ""

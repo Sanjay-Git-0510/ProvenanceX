@@ -5,6 +5,7 @@ Every error response uses the envelope:
 """
 
 import logging
+from enum import StrEnum
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -13,6 +14,30 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
+
+
+class ErrorCode(StrEnum):
+    """Stable machine-readable error codes returned in the error envelope and stored on scans."""
+
+    INVALID_INPUT = "invalid_input"
+    UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
+    INVALID_URL = "invalid_url"
+    URL_NOT_ALLOWED = "url_not_allowed"
+    PRIVATE_ADDRESS = "private_address"
+    DNS_RESOLUTION_FAILED = "dns_resolution_failed"
+    INVALID_REVISION = "invalid_revision"
+    ARTIFACT_TOO_LARGE = "artifact_too_large"
+    TOO_MANY_FILES = "too_many_files"
+    EMPTY_ARTIFACT = "empty_artifact"
+    INVALID_ARCHIVE = "invalid_archive"
+    UNSAFE_ARCHIVE = "unsafe_archive"
+    UNSAFE_CONTENT = "unsafe_content"
+    CLONE_FAILED = "clone_failed"
+    CLONE_TIMEOUT = "clone_timeout"
+    WORKSPACE_ERROR = "workspace_error"
+    SCAN_NOT_FOUND = "scan_not_found"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    INTERNAL_ERROR = "internal_error"
 
 
 class AppError(Exception):

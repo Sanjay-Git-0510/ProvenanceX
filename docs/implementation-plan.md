@@ -3,7 +3,7 @@
 Each phase follows the same loop: inspect the repo, list the files, **wait for approval**, implement, then run tests, lint and build.
 After that, report what passed, what failed and what remains, and wait for the go-ahead.
 
-## Phase 0: Repository and skeleton ✅ (this phase)
+## Phase 0: Repository and skeleton ✅
 - Monorepo layout: `backend/`, `frontend/`, `contracts/`, `ml/`, `docs/`, `.github/`
 - FastAPI app factory, settings, logging and structured errors
 - `/api/v1/health` (liveness) and `/api/v1/health/ready` (DB check)
@@ -12,7 +12,10 @@ After that, report what passed, what failed and what remains, and wait for the g
 - Docker Compose (postgres, api, frontend) and CI (lint, tests with Postgres, build)
 - **Exit:** backend and frontend tests and lint pass, the frontend builds, and `docker compose up` returns ready
 
-## Phase 1: Software ingestion
+## Phase 1: Software ingestion ✅
+As built, the scan endpoint takes a multipart form and runs ingestion as a background task. The artifact `sha256` is the
+`provenancex-tree-v1` content digest, plus `archive_sha256` for uploads. The workspace is removed on failure and kept on success.
+
 - `app/security/url_validation.py`:
   - https only, `github.com` allowlist (plus `huggingface.co` for Phase 3)
   - DNS resolution, then rejection of private, loopback, link-local and reserved IPs

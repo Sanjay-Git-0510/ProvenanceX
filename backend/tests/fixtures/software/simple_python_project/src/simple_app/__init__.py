@@ -1,0 +1,1 @@
+"""Benign fixture package."""

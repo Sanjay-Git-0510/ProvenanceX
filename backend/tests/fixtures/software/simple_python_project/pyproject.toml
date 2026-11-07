@@ -1,0 +1,4 @@
+[project]
+name = "simple-app"
+version = "0.1.0"
+dependencies = ["flask==3.0.3", "requests==2.32.3"]

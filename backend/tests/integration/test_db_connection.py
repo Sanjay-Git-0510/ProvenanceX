@@ -37,12 +37,22 @@ def test_is_postgres(engine):
 def test_alembic_upgrade_head(engine):
     from alembic import command
     from alembic.config import Config
+    from alembic.script import ScriptDirectory
 
     cfg = Config("alembic.ini")
     command.upgrade(cfg, "head")
+    head = ScriptDirectory.from_config(cfg).get_current_head()
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0001"
+    assert head == "0002"  # bump when a new migration is added
+    assert version == head
+
+
+def test_phase1_tables_exist_after_upgrade(engine):
+    from sqlalchemy import inspect
+
+    tables = set(inspect(engine).get_table_names())
+    assert {"artifacts", "scans"} <= tables
 
 
 def test_readiness_endpoint_with_real_db(engine):

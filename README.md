@@ -7,8 +7,9 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 0, the skeleton.** Only health checks, the DB connection, migrations and the UI shell work so far.
-> No scanning is implemented yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> **Status: Phase 1, software ingestion.** A software artifact can be submitted as a GitHub URL or a ZIP upload.
+> It is fetched or extracted safely, hashed with SHA-256, and its manifests are detected.
+> No SBOM, vulnerability, risk or blockchain stages exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -63,14 +64,41 @@ cd frontend && npm run build
 Backend integration tests (`-m integration`) need a reachable PostgreSQL at `DATABASE_URL`.
 Without one they are **skipped with an explicit reason**. In CI they run against a Postgres service, and any skip fails the build.
 
-## API (Phase 0)
+## API
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/health` | Liveness: `{status, version}` |
 | GET | `/api/v1/health/ready` | Readiness (DB check). Returns 503 with `{"error": {...}}` when the DB is down. |
+| POST | `/api/v1/scans/software` | Start a software scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
+| GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, and a structured error if the scan failed |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
+
+### Starting a software scan
+
+Send exactly one of `source_url` or `file`:
+
+```bash
+# GitHub repository (https://github.com/<owner>/<repo> only), optional branch/tag/full commit SHA
+curl -F source_url=https://github.com/psf/requests -F revision=v2.32.3 \
+     http://localhost:8000/api/v1/scans/software
+
+# ZIP upload (optional display name)
+curl -F file=@project.zip -F name=my-project http://localhost:8000/api/v1/scans/software
+
+curl http://localhost:8000/api/v1/scans/<scan_id>
+```
+
+The scan runs in the background. Its status moves `queued → running → completed | failed`.
+`artifact.sha256` is a deterministic **content digest** (`provenancex-tree-v1`; see
+`backend/app/core/hashing.py`), so the same files produce the same hash whether they came from a ZIP or a git clone.
+For uploads, `ingest.archive_sha256` is the hash of the raw ZIP bytes.
+
+Input safety:
+- URLs: https only, `github.com` allowlist, and the host must resolve to a public IP.
+- ZIPs: rejected for path traversal, absolute paths, symlinks, special files, encryption, duplicate entries, decompression bombs, or size and file-count limits.
+- git: shallow clone, hooks, submodules, redirects and LFS disabled, with a timeout and size cap.
 
 ## Safety
 
