@@ -1,0 +1,12 @@
+/* Minimal neutral layout only. Visual design (Lumora reference) is applied in Phase 8. */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; line-height: 1.5; }
+.layout { display: grid; grid-template-columns: 14rem 1fr; grid-template-rows: auto 1fr; min-height: 100vh; }
+.topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid #ccc; }
+.brand { font-weight: 600; }
+.nav ul { list-style: none; margin: 0; padding: 1rem; }
+.nav li { margin-bottom: 0.25rem; }
+.nav a.active { font-weight: 600; }
+.content { padding: 1rem 1.5rem; }
+.status-badge { font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid currentColor; border-radius: 999px; }
+@media (max-width: 640px) { .layout { grid-template-columns: 1fr; } }

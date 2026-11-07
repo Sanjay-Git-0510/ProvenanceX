@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: provenancex
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: provenancex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U provenancex"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://provenancex:ci-only-password@localhost:5432/provenancex
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check . && ruff format --check .
+      - run: alembic upgrade head
+      # Postgres is available here, so integration tests must actually run: fail on any skip.
+      - name: pytest (no skips allowed)
+        run: |
+          set -o pipefail
+          pytest -q -rs | tee pytest.out
+          if grep -qE '[0-9]+ skipped' pytest.out; then echo "::error::tests were skipped in CI"; exit 1; fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx vitest --run
+      - run: npm run build

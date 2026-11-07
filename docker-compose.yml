@@ -1,0 +1,52 @@
+# Local development stack. Phase 4 adds the sandbox image; Phase 7 adds the hardhat service.
+# Ports are bound to 127.0.0.1 so nothing is exposed beyond the dev machine.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-provenancex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-provenancex}
+      POSTGRES_DB: ${POSTGRES_DB:-provenancex}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-provenancex}:${POSTGRES_PASSWORD:-provenancex}@postgres:5432/${POSTGRES_DB:-provenancex}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SCANNER_VERSION: ${SCANNER_VERSION:-0.1.0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      MAX_ARTIFACT_SIZE_MB: ${MAX_ARTIFACT_SIZE_MB:-200}
+      MAX_ARTIFACT_FILES: ${MAX_ARTIFACT_FILES:-20000}
+      WORKSPACE_ROOT: /app/workspace
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
