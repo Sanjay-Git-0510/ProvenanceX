@@ -60,7 +60,7 @@ _Last updated: 2026-11-08_
   committed.** Milestones A, B and C plus the post-review hardening are done. Final results:
   `pytest -m "not network and not sandbox"` 1477 passed, 0 skipped;
   `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox` 35 passed. Details are under "Phase 4 progress".
-- **Phase 5 (dataset, models, evaluation): in progress.** Milestone A is complete and awaiting commit.
+- **Phase 5 (dataset, models, evaluation): in progress.** Milestones A (committed) and B (awaiting commit) are complete.
   Details are under "Phase 5 progress".
 
 ## Known limitations (documented in architecture.md §4)
@@ -89,7 +89,7 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 5, Milestone B (training):** not started. Wait for the go-ahead. Do not start Phase 6.
+**Phase 5, Milestone C (evaluation):** not started. Wait for the go-ahead. Do not start Phase 6.
 
 Decisions already approved for the rest of Phase 5:
 - Model format: `skops` with an explicit trusted-type list for Random Forest and Isolation Forest,
@@ -104,10 +104,33 @@ Decisions already approved for the rest of Phase 5:
 
 ## Phase 5 progress
 
-- **Milestone A (dataset generation): complete, awaiting commit.**
+- **Milestone B (training): complete, awaiting commit.**
+  - New: `app/ml/preprocessing.py`, `training.py`, `artifacts.py`, `ml/scripts/train_models.py`.
+    CI ruff now covers `backend/` and `ml/scripts/`.
+  - Trained with `--seed 42` on 1629 train records (409 benign for Isolation Forest), with 348
+    validation records used for thresholds. 79 columns. The five no-source features were dropped as
+    all-null. Models are in git-ignored `ml/models/`; regenerate them with the script.
+  - Thresholds, chosen on validation: RF 0.4488, XGBoost 0.2733, Isolation Forest 0.5987. The
+    validation F1 and FPR stored beside them justify the threshold only. They are synthetic and
+    were optimized on those same records, so they are **not evaluation results**.
+  - The test split was not read: test rows are dropped unparsed, and a test covers this.
+  - skops loads with an explicit list (only `sklearn.tree._tree.Tree` beyond its defaults). Bytes are
+    hashed and parsed from one read. Library versions must match the manifest.
+  - **Verified on this machine (2026-11-08), Compose Postgres on 5433:**
+    - The exact CI ruff command (`backend/` and `ml/scripts/`): clean
+    - `pytest -m "not network and not sandbox"`: 1701 passed, 0 failed, 0 skipped, 42 deselected
+    - `train_models.py`: trained, saved, then reloaded through `load_bundle`
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected), frontend tests, Docker
+    builds, and any test on Python 3.12. Artifacts were built on Python 3.14; loading them on 3.12
+    in Phase 6 is untested. The CI workflow change has not run on GitHub yet.
+  - **Limitations:** the manifest is unsigned, so `ml/models/` must stay trusted. The API image does
+    not include the ML packages yet (Phase 6). The Makefile `lint` target still covers only `backend/`.
+  - **Rule for Milestone C:** the test split is used there for the first time. Do not retune
+    thresholds or hyperparameters after seeing test results.
+- **Milestone A (dataset generation): complete and committed.**
   - Python 3.14.4 wheel check passed for numpy 2.5.4, scikit-learn 1.9.1, xgboost 3.4.1, skops 0.16.0
     and shap 0.54.1 (install only). The same versions have Python 3.12 wheels (download checked).
-    Only numpy is installed and pinned so far, in `backend/requirements-ml.txt`.
+    `backend/requirements-ml.txt` pins numpy, scikit-learn, xgboost and skops. shap is not installed yet.
   - New: `app/ml/feature_schema.py`, `features.py`, `comparison.py`, `app/ml/dataset/`,
     `ml/scripts/generate_dataset.py`, seeds in `tests/fixtures/ml/`.
   - `features.py` reads the `Scan.stages` shape for reuse in Phase 6. It is not wired into the pipeline.
@@ -123,7 +146,6 @@ Decisions already approved for the rest of Phase 5:
     - `pytest -m "not network and not sandbox"`: 1614 passed, 0 failed, 0 skipped, 42 deselected
   - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected; no code they cover
     changed), frontend tests, Docker builds. Tests ran on Python 3.14 only, not 3.12.
-  - CI runs ruff from `backend/`, so it does not lint `ml/scripts/`.
   - **Added after auditing the generated data, beyond the approved list:**
     - Prior-scan availability is drawn independently of the label. Its null rate had ranged from 13%
       to 43% by label, which leaked the label.

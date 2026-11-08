@@ -1,2 +1,5 @@
 # ML dependencies, pinned. Wheels verified on Python 3.14 (local venv) and 3.12 (CI, containers).
 numpy==2.5.4
+scikit-learn==1.9.1
+xgboost==3.4.1
+skops==0.16.0
