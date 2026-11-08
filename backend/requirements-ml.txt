@@ -1,0 +1,2 @@
+# ML dependencies, pinned. Wheels verified on Python 3.14 (local venv) and 3.12 (CI, containers).
+numpy==2.5.4

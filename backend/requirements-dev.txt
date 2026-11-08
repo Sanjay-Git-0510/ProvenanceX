@@ -1,3 +1,4 @@
 -r requirements.txt
+-r requirements-ml.txt
 pytest>=8.2
 ruff>=0.5

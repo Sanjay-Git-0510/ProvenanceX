@@ -1,0 +1,16 @@
+"""Synthetic fixture for {{NAME}}: inert patterns for static rules. Parsed only, never run."""
+
+import base64
+import os
+import socket
+import subprocess
+
+
+def _never_called():
+    encoded = base64.b64decode("dHJ1ZQ==").decode()
+    eval("1 + 1")
+    exec("pass")
+    os.system(encoded)
+    subprocess.Popen(["true"], shell=False)
+    conn = socket.socket()
+    conn.connect(("192.0.2.1", 9))

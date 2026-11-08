@@ -1,0 +1,8 @@
+"""Synthetic fixture: developer tooling for {{NAME}}. Parsed only, never run."""
+
+import subprocess
+
+
+def current_branch():
+    done = subprocess.run(["git", "branch", "--show-current"], capture_output=True, check=True)
+    return done.stdout.decode().strip()

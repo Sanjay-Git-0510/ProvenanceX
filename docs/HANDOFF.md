@@ -60,6 +60,8 @@ _Last updated: 2026-11-08_
   committed.** Milestones A, B and C plus the post-review hardening are done. Final results:
   `pytest -m "not network and not sandbox"` 1477 passed, 0 skipped;
   `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox` 35 passed. Details are under "Phase 4 progress".
+- **Phase 5 (dataset, models, evaluation): in progress.** Milestone A is complete and awaiting commit.
+  Details are under "Phase 5 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -87,9 +89,51 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 5:** dataset generation, baseline models and evaluation. Not started. Under the agent rules
-in `CLAUDE.md`, inspect the repo and propose the Phase 5 file list for approval before implementing
-anything.
+**Phase 5, Milestone B (training):** not started. Wait for the go-ahead. Do not start Phase 6.
+
+Decisions already approved for the rest of Phase 5:
+- Model format: `skops` with an explicit trusted-type list for Random Forest and Isolation Forest,
+  XGBoost native JSON, plain JSON for preprocessing. Verify the SHA-256 manifest before every load.
+  Never use a blanket trust option, and never use pickle or joblib.
+- Nulls: an `<name>__is_null` indicator plus a median fitted on the training set only. All-null
+  features are dropped and recorded.
+- Milestone C adds a leave-one-recipe-out test and repeats across 5 family-split seeds.
+- The evaluation report must list the five features with no data source as not evaluated, and must
+  note that vulnerable-vs-not is almost fully determined by `vulnerable_count`, so the rules
+  baseline is expected to do well on that class.
+
+## Phase 5 progress
+
+- **Milestone A (dataset generation): complete, awaiting commit.**
+  - Python 3.14.4 wheel check passed for numpy 2.5.4, scikit-learn 1.9.1, xgboost 3.4.1, skops 0.16.0
+    and shap 0.54.1 (install only). The same versions have Python 3.12 wheels (download checked).
+    Only numpy is installed and pinned so far, in `backend/requirements-ml.txt`.
+  - New: `app/ml/feature_schema.py`, `features.py`, `comparison.py`, `app/ml/dataset/`,
+    `ml/scripts/generate_dataset.py`, seeds in `tests/fixtures/ml/`.
+  - `features.py` reads the `Scan.stages` shape for reuse in Phase 6. It is not wired into the pipeline.
+  - Generated with `--families 200 --seed 42`: 2333 records, labels {'benign': 585, 'provenance_weak': 578, 'suspicious': 785, 'vulnerable': 385},
+    splits {'test': 356, 'train': 1629, 'validation': 348}, `dataset_sha256` `d01885bf8a1517923f43c1511fae23589fdabf14cbb72099d1a370d2f8388ab8`. Output is in git-ignored `ml/data/`.
+  - `malicious_known_bad` has no records, so the models can make no malware-detection claim.
+  - 340 records keep their label although the evidence was not observed
+    (`label_evidence_observable=false`). They are expected to be missed.
+  - Nothing is executed and the sandbox is not used. SBOMs, `SYNTH-*` advisories and traces are
+    generated; the real parsers process the files, SBOMs and traces.
+  - **Verified on this machine (2026-11-08), Compose Postgres on 5433:**
+    - `ruff check` / `ruff format --check` (backend and `ml/scripts`): clean
+    - `pytest -m "not network and not sandbox"`: 1614 passed, 0 failed, 0 skipped, 42 deselected
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected; no code they cover
+    changed), frontend tests, Docker builds. Tests ran on Python 3.14 only, not 3.12.
+  - CI runs ruff from `backend/`, so it does not lint `ml/scripts/`.
+  - **Added after auditing the generated data, beyond the approved list:**
+    - Prior-scan availability is drawn independently of the label. Its null rate had ranged from 13%
+      to 43% by label, which leaked the label.
+    - `docs_update` (benign) and `vulnerable_new_release` variants, `hash_changed_same_commit` and
+      `revision_pinned` features, and `Recipe.needs_prior`.
+    - Traces use a public address literal, because the parser ignores reserved ranges. It is only
+      parsed, never contacted.
+  - **Limitations:** see `ml/README.md`. `version_consistency` nulls still vary by label (about 32%
+    for provenance_weak, 43% for the others), because the mismatch recipe needs a release tag. The
+    benign/tampered overlap is designed, not observed.
 
 ## Phase 4 progress
 

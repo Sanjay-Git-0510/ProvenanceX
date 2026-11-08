@@ -1,0 +1,12 @@
+"""Synthetic fixture for {{NAME}}: an install hook that does nothing. Parsed only, never run."""
+
+from setuptools import setup
+from setuptools.command.install import install
+
+
+class PostInstall(install):
+    def run(self):
+        install.run(self)
+
+
+setup(name="{{NAME}}", cmdclass={"install": PostInstall})
