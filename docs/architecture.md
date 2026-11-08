@@ -293,6 +293,21 @@ Known limitations and residual risk:
 - If the API process crashes mid-run, the host cleanup cannot run. The supervisor's own timeout still
   ends the container; a container whose supervisor also hung would need removing by hand.
 
+### Phase 5 dataset, models and evaluation
+
+Code is in `backend/app/ml/`, command-line entry points in `ml/scripts/`. None of it is wired into the
+scan pipeline yet (Phase 6). The API image does not include the ML packages.
+
+- **Dataset:** synthetic records from the real parsers over generated artifacts and controlled
+  tampering. Nothing is executed. Splits are by artifact family.
+- **Models:** Random Forest (primary), XGBoost (comparison), Isolation Forest, on one matrix with
+  explicit null indicators. Artifacts use skops and JSON, never pickle or joblib, and are verified
+  against a SHA-256 manifest on load.
+- **Evaluation:** `ml/reports/`, generated from real runs on synthetic data. It does not measure
+  real-world detection.
+
+Details are in `ml/README.md`.
+
 ## 5. Data model (PostgreSQL)
 
 | Entity | Key fields | Phase |

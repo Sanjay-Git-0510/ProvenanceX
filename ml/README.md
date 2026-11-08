@@ -6,6 +6,7 @@ Dataset generation, training and evaluation for ProvenanceX.
   `backend/app/ml/`.
 - `data/`: generated feature datasets (git-ignored)
 - `models/`: trained models and preprocessing parameters (git-ignored)
+- `reports/`: evaluation report written by a script from a real run (tracked)
 
 ## Data policy
 
@@ -110,3 +111,14 @@ versions, unexpected manifest entries and symlinks.
 
 The manifest is not signed. It catches corruption and partial replacement, but anyone who can
 rewrite the whole directory can rewrite the manifest too, so `ml/models/` must stay trusted.
+
+## Evaluation
+
+`ml/reports/evaluation_report.md` and `.json` are written by `ml/scripts/evaluate_models.py` from a
+real run. Never edit them by hand. The report opens with what synthetic data means for the claims.
+
+- Primary results use the saved models and their validation thresholds on the untouched test split.
+- Repeated splits, ablation and leave-one-recipe-out retrain, and pick thresholds on their own
+  validation split by the same procedure. Nothing is chosen after seeing test results.
+- Undefined metrics are `n/a`, never 0.
+- Baselines report how many records they could not evaluate.

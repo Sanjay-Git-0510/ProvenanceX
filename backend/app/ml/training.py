@@ -72,18 +72,24 @@ class ModelBundle:
     metadata: dict[str, Any]
 
 
-def load_training_records(data_dir: Path) -> tuple[list[FeatureRecord], list[FeatureRecord], dict]:
-    """Return (train, validation, dataset metadata). Test rows are discarded unparsed.
-
-    The file digest covers the whole file so a modified dataset is refused, but test rows are
-    never decoded into records or returned.
-    """
+def read_verified_dataset(data_dir: Path) -> tuple[bytes, dict[str, Any]]:
+    """Return the dataset bytes and metadata after checking format and digest."""
     metadata = json.loads((data_dir / "dataset_metadata.json").read_text(encoding="utf-8"))
     if metadata.get("format") != DATASET_FORMAT:
         raise ValueError("Unknown dataset format")
     body = (data_dir / "dataset.jsonl").read_bytes()
     if hashlib.sha256(body).hexdigest() != metadata.get("dataset_sha256"):
         raise ValueError("dataset.jsonl does not match the digest in its metadata")
+    return body, metadata
+
+
+def load_training_records(data_dir: Path) -> tuple[list[FeatureRecord], list[FeatureRecord], dict]:
+    """Return (train, validation, dataset metadata). Test rows are discarded unparsed.
+
+    The file digest covers the whole file so a modified dataset is refused, but test rows are
+    never decoded into records or returned.
+    """
+    body, metadata = read_verified_dataset(data_dir)
     splits: dict[str, list[FeatureRecord]] = {"train": [], "validation": []}
     for line in body.splitlines():
         row = json.loads(line)
@@ -164,7 +170,7 @@ def _require_split(records: list[FeatureRecord], expected: str) -> None:
         raise ValueError(f"Expected only {expected} records, got {wrong}")
 
 
-def _fit_forest(matrix: np.ndarray, labels: np.ndarray, cfg: TrainingConfig):
+def fit_forest(matrix: np.ndarray, labels: np.ndarray, cfg: TrainingConfig):
     model = RandomForestClassifier(
         n_estimators=cfg.rf_estimators,
         min_samples_leaf=cfg.rf_min_samples_leaf,
@@ -210,7 +216,7 @@ def train_models(
     cfg = cfg or TrainingConfig()
     _require_split(validation, "validation")
     params, x_train, y_train = fit_supervised_and_preprocess(train, cfg)
-    forest = _fit_forest(x_train, y_train, cfg)
+    forest = fit_forest(x_train, y_train, cfg)
     booster = _fit_xgboost(x_train, y_train, cfg)
     # Fitted on benign training records only, so "anomalous" means unlike known-good artifacts.
     benign_train = x_train[y_train == BENIGN_INDEX]

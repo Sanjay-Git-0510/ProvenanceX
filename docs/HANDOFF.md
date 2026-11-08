@@ -60,7 +60,7 @@ _Last updated: 2026-11-08_
   committed.** Milestones A, B and C plus the post-review hardening are done. Final results:
   `pytest -m "not network and not sandbox"` 1477 passed, 0 skipped;
   `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox` 35 passed. Details are under "Phase 4 progress".
-- **Phase 5 (dataset, models, evaluation): in progress.** Milestones A (committed) and B (awaiting commit) are complete.
+- **Phase 5 (dataset, models, evaluation): in progress.** Milestones A and B are committed. Milestone C is complete and awaiting commit.
   Details are under "Phase 5 progress".
 
 ## Known limitations (documented in architecture.md §4)
@@ -89,22 +89,43 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 5, Milestone C (evaluation):** not started. Wait for the go-ahead. Do not start Phase 6.
+**Phase 6 (fusion, policy, SHAP, explanation API):** not started. Wait for the go-ahead. Under the
+agent rules in `CLAUDE.md`, inspect the repo and propose the Phase 6 file list for approval first.
 
-Decisions already approved for the rest of Phase 5:
-- Model format: `skops` with an explicit trusted-type list for Random Forest and Isolation Forest,
-  XGBoost native JSON, plain JSON for preprocessing. Verify the SHA-256 manifest before every load.
-  Never use a blanket trust option, and never use pickle or joblib.
-- Nulls: an `<name>__is_null` indicator plus a median fitted on the training set only. All-null
-  features are dropped and recorded.
-- Milestone C adds a leave-one-recipe-out test and repeats across 5 family-split seeds.
-- The evaluation report must list the five features with no data source as not evaluated, and must
-  note that vulnerable-vs-not is almost fully determined by `vulnerable_count`, so the rules
-  baseline is expected to do well on that class.
+Notes for Phase 6:
+- Do not retune thresholds or hyperparameters against the Phase 5 test split.
+- Null evidence must lower confidence and never read as clean. See the false-positive finding below.
+- Loading artifacts built on Python 3.14 from the 3.12 API image is untested.
 
 ## Phase 5 progress
 
-- **Milestone B (training): complete, awaiting commit.**
+- **Milestone C (evaluation): complete, awaiting commit.**
+  - New: `app/ml/evaluation.py`, `baselines.py`, `ablation.py`, `reporting.py`,
+    `ml/scripts/evaluate_models.py`, and the generated `ml/reports/evaluation_report.{md,json}`.
+    Every number in those reports is written by the script from a real run; see them for results.
+  - **The data is synthetic, and the results do not measure real-world detection.**
+  - No threshold or hyperparameter changed after seeing test results. Retraining experiments pick
+    thresholds on their own validation split by the Milestone B procedure. Retraining at seed 42
+    reproduced the saved thresholds within 1e-9. An exact comparison failed on floating-point noise
+    from parallel tree averaging.
+  - **Findings to carry forward (figures in the report):**
+    - Random Forest flags far more benign records when the hash comparison is missing. The report
+      measures this; the base-rate explanation is not proven.
+    - Isolation Forest is near chance on this data, so it should not carry much fusion weight.
+    - Unseen tampering is detected much worse than seen tampering (leave-one-recipe-out).
+    - A flag-everything detector already scores high F1 here, because most records are not benign.
+    - The expected strong rules result on the vulnerable class was only partly borne out: the label
+      implies `vulnerable_count` > 0, but the reverse holds for only about half of the records.
+  - **Verified on this machine (2026-11-08), Compose Postgres on 5433:**
+    - The exact CI ruff command (`backend/` and `ml/scripts/`): clean
+    - `pytest -m "not network and not sandbox"`: 1770 passed, 0 failed, 0 skipped, 42 deselected
+    - `evaluate_models.py`: ran end to end and wrote the report
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected), frontend tests, Docker
+    builds, and any test on Python 3.12.
+  - Beyond the approved list: `tests/ml_helpers.py`, a flag-everything reference row, and a
+    false-positive breakdown by hash comparison, which was added after reading test results. It
+    only reports; it changed no model or threshold.
+- **Milestone B (training): complete and committed.**
   - New: `app/ml/preprocessing.py`, `training.py`, `artifacts.py`, `ml/scripts/train_models.py`.
     CI ruff now covers `backend/` and `ml/scripts/`.
   - Trained with `--seed 42` on 1629 train records (409 benign for Isolation Forest), with 348
@@ -125,8 +146,6 @@ Decisions already approved for the rest of Phase 5:
     in Phase 6 is untested. The CI workflow change has not run on GitHub yet.
   - **Limitations:** the manifest is unsigned, so `ml/models/` must stay trusted. The API image does
     not include the ML packages yet (Phase 6). The Makefile `lint` target still covers only `backend/`.
-  - **Rule for Milestone C:** the test split is used there for the first time. Do not retune
-    thresholds or hyperparameters after seeing test results.
 - **Milestone A (dataset generation): complete and committed.**
   - Python 3.14.4 wheel check passed for numpy 2.5.4, scikit-learn 1.9.1, xgboost 3.4.1, skops 0.16.0
     and shap 0.54.1 (install only). The same versions have Python 3.12 wheels (download checked).
