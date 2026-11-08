@@ -9,6 +9,7 @@ Implements CLAUDE.md pipeline steps for AI artifacts:
   6. lineage graph             (NetworkX -> GraphNode/GraphEdge rows)          [lineage_stage]
   7. OSV lookup                (exactly pinned runtime requirements only)      [vuln_stage]
   8. provenance/integrity      (ProvenanceRecord + provenance Findings)        [provenance_stage]
+  9. static analysis           (static features + static Findings)             [static_stage]
 
 Nothing from the artifact is executed, imported or deserialized. The lifecycle (failure
 handling, workspace cleanup) is shared with the software pipeline (lifecycle.py).
@@ -28,12 +29,13 @@ from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.core.hashing import TREE_DIGEST_VERSION, sha256_file, tree_digest
 from app.db.models import ArtifactSource, Scan, utcnow
-from app.pipeline.aibom_stage import run_aibom_stage
+from app.pipeline.aibom_stage import AiBomStageOutput, run_aibom_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.lineage_stage import run_lineage_stage
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
 from app.pipeline.providers import ScanProviders, build_providers
 from app.pipeline.stages import skip_stage
+from app.pipeline.static_stage import StaticExtras, run_static_stage
 from app.pipeline.vuln_stage import run_vuln_stage
 from app.pipeline.workspace import MB, Workspace
 from app.scanners.hf.base import HfFetchLimits, HfFetchResult
@@ -212,7 +214,7 @@ def _run_evidence_stages(
     providers: ScanProviders,
     ingested: ModelIngest,
 ) -> None:
-    """Steps 5, 6, 7, 8. Each stage records its own status and never raises."""
+    """Steps 5, 6, 7, 8, 9. Each stage records its own status and never raises."""
     input_source = ingested.hf.source if ingested.hf else "upload"
     aibom = run_aibom_stage(session, scan_id, workspace, settings, ingested.ctx, input_source)
     lineage: dict[str, Any] | None = None
@@ -251,6 +253,35 @@ def _run_evidence_stages(
             file_paths=ingested.file_paths,
         ),
         settings.max_artifact_files,
+    )
+    run_static_stage(
+        session,
+        scan_id,
+        workspace,
+        settings,
+        _static_extras(input_source, aibom, hf),
+    )
+
+
+def _static_extras(
+    input_source: str, aibom: AiBomStageOutput | None, hf: HfFetchResult | None
+) -> StaticExtras:
+    """Pickle and auto_map evidence comes from the AI-BOM, so no finding is duplicated."""
+    pickle_dangerous: int | None = None
+    auto_map_targets = 0
+    if aibom is not None:
+        analysis = aibom.analysis
+        pickle_dangerous = sum(
+            len(f.analysis["pickle"]["dangerous_globals"])
+            for f in analysis.inventory
+            if f.analysis.get("pickle") is not None
+        )
+        auto_map_targets = sum(len(m) for m in analysis.custom_code.auto_map.values())
+    return StaticExtras(
+        input_source=input_source,
+        auto_map_targets=auto_map_targets,
+        pickle_dangerous_globals=pickle_dangerous,
+        undownloaded_files=sum(1 for f in hf.files if not f.downloaded) if hf else 0,
     )
 
 

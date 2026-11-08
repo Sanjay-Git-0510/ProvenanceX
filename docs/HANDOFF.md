@@ -83,6 +83,32 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 4:** static analysis features, Docker sandbox and telemetry parser. Not started. Under the
-agent rules in `CLAUDE.md`, inspect the repo and propose the Phase 4 file list for approval before
-implementing anything.
+**Phase 4, Milestone B:** telemetry parser. Wait for the go-ahead. The approved plan is in
+`~/.claude/plans/pasted-content-id-c960-read-claude-md-iridescent-lobster.md`. Milestone C is the
+Docker sandbox. Phase 5 is not started.
+
+## Phase 4 progress
+
+- **Milestone A (static analysis): complete, uncommitted on `main`. Awaiting review.**
+  - New stage `static` (pipeline step 9) runs after `provenance` for software and model scans.
+    Code is only parsed with `ast` or text rules, never imported or run.
+  - Features are in `stages.static.features`: `dangerous_import_count`, `suspicious_api_count`,
+    `script_presence`, `archive_anomaly`, and supporting counts.
+  - Findings are `category="static"` with `details.kind` of `dangerous_import`, `suspicious_api`,
+    `install_script` or `archive_anomaly`, and no CVSS. No migration.
+  - When a budget is hit the stage is `partial` and lists what was skipped, so a 0 is only a clean
+    result when `counts.not_analyzed` is also 0.
+- **Milestone A verified on this machine (2026-11-08), Compose Postgres on 5433:**
+  - `ruff check` / `ruff format --check`: clean
+  - `pytest -m "not network"`: 1126 passed, 0 skipped
+  - `docker compose build api` + `up --wait`: healthy
+  - Live runs through the Docker API:
+    - `github.com/pallets/flask`: 236 files analyzed, 7 suspicious API calls, 5 findings
+    - `hf-internal-testing/tiny-random-gpt2`: 10 files analyzed, no scripts, 0 static-stage findings
+    - Upload containing NUL bytes and a lone surrogate: stored on PostgreSQL without error
+- **Differences from the plan:** `getattr` with a plain variable name is flagged only on sensitive
+  modules (`os`, `subprocess`, `builtins`, ...), because `getattr(obj, name)` is common in ordinary
+  code. Computed names are always flagged. `docker-compose.yml` also passes the `STATIC_*` settings.
+- **Static limitations:** aliases are tracked per file without scopes, so heavily obfuscated code
+  can evade the rules. Nested tar, 7z and rar archives are flagged but not inspected. A match shows
+  what code can do and is not evidence of malice.

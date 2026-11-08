@@ -171,6 +171,30 @@ Known limitations:
   every hop, and downloaded content is verified against the Hub listing.
 - Hugging Face downloads follow up to 5 redirect hops (`MAX_REDIRECTS`), accepted for the MVP.
 
+### Phase 4 static analysis (`static` stage, step 9)
+
+`app/scanners/static/` runs for software and model scans, after provenance. Artifact code is only
+parsed, never imported or run.
+
+- **Python** (`python_ast.py`): `ast`, with a per-file alias table that follows `import os as o`,
+  `from os import system`, `run = os.system`, `__import__("os")` and `getattr(os, "system")`.
+  `.ipynb` code cells are parsed the same way. Unparseable Python falls back to text rules.
+- **Other scripts** (`text_scan.py`): bounded line-based rules for shell, batch, PowerShell and
+  JavaScript. Files without an extension are routed by their shebang.
+- **Install hooks** (`install_hooks.py`): npm lifecycle scripts and `setup.py` (`cmdclass` overrides
+  rank higher). `auto_map` targets are counted but reported by the AI-BOM stage.
+- **Archive anomalies** (`archive_anomaly.py`): nested ZIP-family files are read through the central
+  directory only and never decompressed. Also disguised executables, double extensions, and upload
+  entries near the compression limit.
+
+Features are stored in `stages.static.features`. Findings are `category="static"` with no CVSS, one
+per rule and file, capped at `STATIC_MAX_FINDINGS` (features still count every occurrence). When a
+budget is hit the stage is `partial` and lists the skipped files. Artifact text is sanitized before
+storage, because PostgreSQL rejects NUL bytes and lone surrogates.
+
+Known limitations: aliases are tracked per file without scopes, so heavily obfuscated code can evade
+these rules. Nested tar, 7z and rar archives are flagged but not inspected.
+
 ## 5. Data model (PostgreSQL)
 
 | Entity | Key fields | Phase |

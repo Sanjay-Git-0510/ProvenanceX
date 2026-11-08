@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     pickle_max_opcodes: int = Field(default=2_000_000, gt=0)
     model_card_max_kb: int = Field(default=256, gt=0)
 
+    # --- Static analysis budgets (Phase 4, parse-only)
+    static_max_files: int = Field(default=5000, gt=0)
+    static_max_file_kb: int = Field(default=1024, gt=0)
+    static_max_total_mb: int = Field(default=64, gt=0)
+    static_max_findings: int = Field(default=500, gt=0)
+    # Research parameter: a share of MAX_COMPRESSION_RATIO that counts as "near the limit".
+    static_archive_ratio_warn_fraction: float = Field(default=0.8, gt=0, le=1)
+
     sandbox_timeout_seconds: int = Field(default=60, gt=0)
     model_path: Path = Path("./ml/models")
 

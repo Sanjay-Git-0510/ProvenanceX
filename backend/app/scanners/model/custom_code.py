@@ -1,4 +1,4 @@
-"""Custom-code presence in a model repository (listing only; Phase 4 analyzes the code).
+"""Custom-code presence in a model repository (listing only; app/scanners/static analyzes it).
 
 Records:
 - script files (*.py, shell, notebooks) and native binaries (*.so, *.dll, *.dylib)

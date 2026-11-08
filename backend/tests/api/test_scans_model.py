@@ -120,6 +120,7 @@ def test_hf_scan_records_all_stages(mock_scan):
         "graph": "completed",
         "vulnerabilities": "completed",
         "provenance": "completed",
+        "static": "completed",
     }
 
 
