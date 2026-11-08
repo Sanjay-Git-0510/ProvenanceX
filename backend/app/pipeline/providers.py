@@ -1,8 +1,8 @@
 """Builds the external-integration providers for a scan, based on settings.
 
 Real providers are the default. Mocks are used only when configured explicitly
-(SBOM_PROVIDER=mock / VULN_PROVIDER=mock), never as a silent fallback when a real tool
-is missing. A missing tool shows up as an `unavailable` stage instead.
+(SBOM_PROVIDER=mock / VULN_PROVIDER=mock / HF_PROVIDER=mock), never as a silent fallback
+when a real tool is missing. A missing tool shows up as an `unavailable` stage instead.
 """
 
 from collections.abc import Callable
@@ -12,6 +12,9 @@ import httpx
 
 from app.core.config import Settings
 from app.pipeline.workspace import MB
+from app.scanners.hf.base import HfProvider
+from app.scanners.hf.client import HuggingFaceProvider
+from app.scanners.hf.mock import MockHfProvider
 from app.scanners.sbom.base import SbomProvider
 from app.scanners.sbom.mock import MockSbomProvider
 from app.scanners.sbom.syft import SyftProvider
@@ -27,6 +30,7 @@ class ScanProviders:
     sbom: SbomProvider
     vulns: VulnProvider
     nvd: NvdEnricher | None
+    hf: HfProvider | None = None
 
 
 def _client_factory(
@@ -72,4 +76,15 @@ def build_providers(
                 _client_factory(settings, settings.nvd_timeout_seconds, transport),
                 settings.nvd_max_lookups,
             )
-    return ScanProviders(sbom=sbom, vulns=vulns, nvd=nvd)
+    hf: HfProvider
+    if settings.hf_provider == "mock":
+        hf = MockHfProvider()
+    else:
+        hf = HuggingFaceProvider(
+            timeout_seconds=settings.hf_timeout_seconds,
+            max_retries=settings.http_max_retries,
+            max_api_bytes=settings.http_max_response_mb * MB,
+            user_agent=f"ProvenanceX/{settings.scanner_version} (supply-chain scanner)",
+            transport=transport,
+        )
+    return ScanProviders(sbom=sbom, vulns=vulns, nvd=nvd, hf=hf)

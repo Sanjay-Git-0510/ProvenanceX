@@ -10,3 +10,8 @@ Everything these providers return is tagged `source="mock"` in the API and the U
   for the fixture packages on the `recorded_at` date. The `affected[].versions` lists are
   removed to keep the file small. The advisories are real public records, but a mock
   lookup is not a live lookup, so the findings it produces are tagged `source="mock"`.
+- `hf_mock_repo/`: a **synthetic** benign LoRA adapter fixture (zero weights, fictional
+  dataset name) for `HF_PROVIDER=mock`. The mock HF provider returns it for **every**
+  requested repository, with a mock commit sha derived from the fixture contents. It is
+  not a recording of a real Hub repository, and everything it produces is tagged
+  `source="mock"`.

@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     http_max_retries: int = Field(default=2, ge=0, le=5)
     http_max_response_mb: int = Field(default=10, gt=0)
 
+    # --- Hugging Face model ingestion (Phase 3). "mock" serves a synthetic benign fixture
+    # repo tagged source="mock". No HF token is used: only public, non-gated repos.
+    hf_provider: Literal["hf", "mock"] = "hf"
+    hf_timeout_seconds: float = Field(default=30.0, gt=0)
+    hf_download_timeout_seconds: int = Field(default=600, gt=0)
+    hf_max_file_mb: int = Field(default=64, gt=0)
+    hf_max_files: int = Field(default=2000, gt=0)
+    # --- Model analysis limits (Phase 3, parse-only)
+    pickle_max_mb: int = Field(default=64, gt=0)
+    pickle_max_opcodes: int = Field(default=2_000_000, gt=0)
+    model_card_max_kb: int = Field(default=256, gt=0)
+
     sandbox_timeout_seconds: int = Field(default=60, gt=0)
     model_path: Path = Path("./ml/models")
 

@@ -88,6 +88,9 @@ class FindingsResponse(BaseModel):
     offset: int
     items: list[FindingOut]
     contains_mock: bool
-    # Status of the stage that produces these findings. "unavailable"/"error"/"skipped"
-    # means an empty list is NOT evidence of "no vulnerabilities".
+    # Status of the vulnerability stage. "unavailable"/"error"/"skipped" means an empty
+    # list is NOT evidence of "no vulnerabilities".
     stage: dict[str, Any] | None
+    # Status of every stage that produces findings, keyed by finding category:
+    # vulnerability -> vulnerabilities, static -> aibom, provenance -> provenance.
+    stages: dict[str, Any] = {}

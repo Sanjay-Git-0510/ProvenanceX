@@ -7,7 +7,8 @@ Scan.bom_sha256, which Phase 7 anchors as `bom_hash`.
 import hashlib
 import logging
 import os
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -17,8 +18,9 @@ from app.core.config import Settings
 from app.db.models import Component, Scan
 from app.pipeline.stages import StageStatus, execute_stage
 from app.pipeline.workspace import MB, Workspace
+from app.scanners.manifests import ProjectPackage, normalize_package_name
 from app.scanners.sbom.base import SbomProvider
-from app.scanners.sbom.cyclonedx import ParsedSbom, parse_cyclonedx
+from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom, parse_cyclonedx
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,28 @@ SBOM_FILENAME = "sbom.cdx.json"
 class SbomStageOutput:
     parsed: ParsedSbom
     component_ids: dict[str, UUID]  # bom-ref -> Component.id
-    source: str  # "syft" | "mock"
+    source: str  # "syft" | "mock" | "aibom"
+    # bom-refs of the scanned project's own package(s); merged into the graph root and
+    # left out of the vulnerability lookup.
+    root_package_refs: frozenset[str] = field(default_factory=frozenset)
+
+
+def match_project_packages(
+    components: Sequence[ParsedComponent], projects: Sequence[ProjectPackage]
+) -> frozenset[str]:
+    """bom-refs of components that are the project itself (same ecosystem, name, version)."""
+    refs: set[str] = set()
+    for project in projects:
+        wanted = normalize_package_name(project.ecosystem, project.name)
+        for comp in components:
+            if comp.ecosystem != project.ecosystem:
+                continue
+            if normalize_package_name(comp.ecosystem, comp.name) != wanted:
+                continue
+            if project.version is not None and comp.version != project.version:
+                continue
+            refs.add(comp.bom_ref)
+    return frozenset(refs)
 
 
 def _write_private(path: os.PathLike[str], data: bytes) -> None:
@@ -45,6 +68,7 @@ def run_sbom_stage(
     workspace: Workspace,
     settings: Settings,
     provider: SbomProvider,
+    project_packages: Sequence[ProjectPackage] = (),
 ) -> SbomStageOutput | None:
     def body(scan: Scan) -> tuple[SbomStageOutput, StageStatus, dict[str, Any]]:
         result = provider.generate(workspace.src_dir, workspace.root)
@@ -57,6 +81,7 @@ def run_sbom_stage(
         bom_sha256 = hashlib.sha256(result.raw).hexdigest()
         scan.bom_sha256 = bom_sha256
 
+        root_refs = match_project_packages(parsed.components, project_packages)
         component_ids: dict[str, UUID] = {}
         for comp in parsed.components:
             component_ids[comp.bom_ref] = cid = uuid4()
@@ -76,11 +101,13 @@ def run_sbom_stage(
                         "found_by": comp.found_by,
                         "locations": list(comp.locations),
                         "cpe": comp.cpe,
+                        "project_root": comp.bom_ref in root_refs,
                     },
                 )
             )
         fields = {
             "source": result.source,
+            "root_packages": sorted(root_refs),
             "tool": result.tool_name,
             "tool_version": result.tool_version,
             "format": result.format,
@@ -93,6 +120,7 @@ def run_sbom_stage(
                 **parsed.stats,
             },
         }
-        return SbomStageOutput(parsed, component_ids, result.source), StageStatus.COMPLETED, fields
+        output = SbomStageOutput(parsed, component_ids, result.source, root_refs)
+        return output, StageStatus.COMPLETED, fields
 
     return execute_stage(session, scan_id, STAGE, body, provider=provider.name)

@@ -83,12 +83,15 @@ def test_scan_records_all_stages(completed, test_settings):
         "sbom": "completed",
         "graph": "completed",
         "vulnerabilities": "completed",
+        "provenance": "completed",
     }
     assert stages["sbom"]["source"] == "mock" and stages["sbom"]["provider"] == "mock"
     assert stages["vulnerabilities"]["source"] == "mock"
     assert body["bom_sha256"] == hashlib.sha256(MOCK_SBOM_PATH.read_bytes()).hexdigest()
     assert body["component_count"] == 4
-    assert body["finding_count"] == 10
+    # 10 known vulnerabilities (mock OSV) + 3 provenance failures for an upload:
+    # unknown source, no signature files, no attestation.
+    assert body["finding_count"] == 13
     sbom_file = test_settings.workspace_root / body["scan_id"] / "sbom.cdx.json"
     assert sbom_file.read_bytes() == MOCK_SBOM_PATH.read_bytes()
     assert oct(sbom_file.stat().st_mode & 0o777) == "0o600"
@@ -96,7 +99,9 @@ def test_scan_records_all_stages(completed, test_settings):
 
 def test_findings_are_labeled_mock_and_sorted(completed):
     client, body = completed
-    data = client.get(f"/api/v1/scans/{body['scan_id']}/findings").json()
+    data = client.get(
+        f"/api/v1/scans/{body['scan_id']}/findings", params={"category": "vulnerability"}
+    ).json()
     assert data["total"] == 10 and data["contains_mock"] is True
     assert data["stage"]["status"] == "completed"
     items = data["items"]
@@ -119,7 +124,9 @@ def test_findings_filters_and_paging(completed):
     assert client.get(base, params={"severity": "HIGH"}).json()["total"] == 3
     assert client.get(base, params={"source": "osv"}).json()["total"] == 0
     assert client.get(base, params={"category": "static"}).json()["total"] == 0
-    page = client.get(base, params={"limit": 4, "offset": 8}).json()
+    assert client.get(base, params={"category": "provenance"}).json()["total"] == 3
+    vuln = {"category": "vulnerability"}
+    page = client.get(base, params={**vuln, "limit": 4, "offset": 8}).json()
     assert page["total"] == 10 and len(page["items"]) == 2
     assert client.get(base, params={"severity": "SEVERE"}).status_code == 422
     assert client.get(base, params={"limit": 0}).status_code == 422
@@ -169,8 +176,11 @@ def test_sbom_tool_missing_marks_unavailable_and_skips(test_settings, session_fa
     assert st["sbom"]["error"]["code"] == "sbom_tool_unavailable"
     assert st["graph"]["status"] == "skipped" and st["vulnerabilities"]["status"] == "skipped"
     assert body["component_count"] == 0 and body["bom_sha256"] is None
-    findings = client.get(f"/api/v1/scans/{body['scan_id']}/findings").json()
+    findings = client.get(
+        f"/api/v1/scans/{body['scan_id']}/findings", params={"category": "vulnerability"}
+    ).json()
     assert findings["total"] == 0 and findings["stage"]["status"] == "skipped"
+    assert st["provenance"]["status"] == "completed"  # provenance does not need the SBOM
     graph = client.get(f"/api/v1/scans/{body['scan_id']}/graph").json()
     assert graph["nodes"] == [] and graph["features"] is None
 
@@ -205,7 +215,11 @@ def test_vuln_source_down_keeps_graph_and_unknown_counts(
     st = body["stages"]
     assert st["sbom"]["status"] == "completed" and st["graph"]["status"] == "completed"
     assert st["vulnerabilities"]["status"] == "unavailable"
-    assert body["component_count"] == 4 and body["finding_count"] == 0
+    assert body["component_count"] == 4
+    vulns = client.get(
+        f"/api/v1/scans/{body['scan_id']}/findings", params={"category": "vulnerability"}
+    ).json()
+    assert vulns["total"] == 0 and vulns["stage"]["status"] == "unavailable"
     f = client.get(f"/api/v1/scans/{body['scan_id']}/graph").json()["features"]
     # Not looked up -> None, never a reassuring 0.
     assert f["vulnerable_count"] is None and f["cvss_max"] is None

@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.db.models import ArtifactSource, ArtifactType, Scan, ScanStatus
+from app.schemas.provenance import ProvenanceOut
 
 
 class ScanCreatedResponse(BaseModel):
@@ -35,6 +36,13 @@ class ManifestOut(BaseModel):
     kind: str
 
 
+class ProjectPackageOut(BaseModel):
+    ecosystem: str
+    name: str
+    version: str | None
+    manifest: str
+
+
 class IngestSummary(BaseModel):
     file_count: int
     total_bytes: int
@@ -44,6 +52,10 @@ class IngestSummary(BaseModel):
     revision_requested: str | None = None
     manifests: list[ManifestOut] = []
     manifests_truncated: bool = False
+    # Software: the project's own package from its top-level manifest (graph root).
+    project_packages: list[ProjectPackageOut] = []
+    # Model scans from Hugging Face: repo, manifest digest, download counts, Hub metadata.
+    hf: dict[str, Any] | None = None
 
 
 class ScanErrorOut(BaseModel):
@@ -61,11 +73,13 @@ class ScanResponse(BaseModel):
     finished_at: datetime | None
     artifact: ArtifactRecord
     ingest: IngestSummary | None
-    # Per-stage evidence status (sbom, graph, vulnerabilities). See app/pipeline/stages.py.
+    # Per-stage evidence status (sbom | aibom, graph, vulnerabilities, provenance).
+    # See app/pipeline/stages.py.
     stages: dict[str, Any] | None = None
     bom_sha256: str | None = None
     component_count: int = 0
     finding_count: int = 0
+    provenance: ProvenanceOut | None = None
     error: ScanErrorOut | None
 
     @classmethod
@@ -105,5 +119,6 @@ class ScanResponse(BaseModel):
             bom_sha256=scan.bom_sha256,
             component_count=component_count,
             finding_count=finding_count,
+            provenance=ProvenanceOut.from_row(scan.provenance) if scan.provenance else None,
             error=error,
         )

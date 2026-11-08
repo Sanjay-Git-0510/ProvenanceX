@@ -1,0 +1,7 @@
+{
+  "model_type": "custom",
+  "architectures": ["CustomModel"],
+  "_name_or_path": "example-org/custom-base",
+  "auto_map": {"AutoConfig": "configuration_custom.CustomConfig", "AutoModel": "modeling_custom.CustomModel"},
+  "transformers_version": "4.40.0"
+}

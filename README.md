@@ -7,9 +7,10 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 1, software ingestion.** A software artifact can be submitted as a GitHub URL or a ZIP upload.
-> It is fetched or extracted safely, hashed with SHA-256, and its manifests are detected.
-> No SBOM, vulnerability, risk or blockchain stages exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> **Status: Phase 3, AI/model ingestion.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
+> known vulnerabilities and provenance. Model files are only parsed, never loaded.
+> Static code analysis, the sandbox, ML, risk scoring and blockchain anchoring do not exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -66,7 +67,7 @@ Without one they are **skipped with an explicit reason**. The real-Syft tests
 (`tests/integration/test_syft_real.py`) are skipped when Syft is not on `PATH`. In CI, Postgres
 and a pinned Syft are both available, and any skip fails the build.
 
-Live-internet tests (marker `network`: GitHub clone, OSV, NVD) run only with
+Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run only with
 `PROVENANCEX_NETWORK_TESTS=1`. CI deselects them with `-m "not network"`.
 
 ## API
@@ -76,9 +77,10 @@ Live-internet tests (marker `network`: GitHub clone, OSV, NVD) run only with
 | GET | `/api/v1/health` | Liveness: `{status, version}` |
 | GET | `/api/v1/health/ready` | Readiness (DB check). Returns 503 with `{"error": {...}}` when the DB is down. |
 | POST | `/api/v1/scans/software` | Start a software scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
-| GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, per-stage evidence status (`stages`), `bom_sha256`, component and finding counts, and a structured error if the scan failed |
+| POST | `/api/v1/scans/model` | Start an AI/ML scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
+| GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, per-stage evidence status (`stages`), `bom_sha256`, `provenance`, component and finding counts, and a structured error if the scan failed |
 | GET | `/api/v1/scans/{scan_id}/findings` | Findings, highest CVSS first. Filters: `category`, `severity`, `source`, `limit`, `offset`. Each item has a separate `cvss` object, `source` and `is_mock`. |
-| GET | `/api/v1/scans/{scan_id}/graph` | Dependency graph nodes and edges, graph features, `limitations`, and `is_mock` |
+| GET | `/api/v1/scans/{scan_id}/graph` | Dependency or model-lineage graph (`graph_kind`), nodes and edges, graph features, `limitations`, and `is_mock` |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
 
@@ -110,8 +112,43 @@ missing or OSV cannot be reached. An empty findings list then does **not** mean 
 CVSS scores are advisory severity. They are not the ProvenanceX risk score (Phase 6), and a known
 vulnerability is not evidence of malice.
 
+### Starting an AI/ML scan
+
+Send exactly one of `source_url` or `file`. `artifact_type` is `model` (default), `lora` or `dataset`:
+
+```bash
+# Public Hugging Face repository, optionally pinned to a branch, tag or full commit SHA
+curl -F source_url=https://huggingface.co/hf-internal-testing/tiny-random-gpt2 \
+     -F artifact_type=model http://localhost:8000/api/v1/scans/model
+
+# Dataset repositories use the /datasets/ path
+curl -F source_url=https://huggingface.co/datasets/<owner>/<name> \
+     http://localhost:8000/api/v1/scans/model
+
+# ZIP of a model directory
+curl -F file=@lora.zip -F artifact_type=lora http://localhost:8000/api/v1/scans/model
+
+curl http://localhost:8000/api/v1/scans/<scan_id>                       # stages, provenance
+curl http://localhost:8000/api/v1/scans/<scan_id>/graph                 # lineage graph
+curl "http://localhost:8000/api/v1/scans/<scan_id>/findings?category=static"
+```
+
+A model scan runs the stages `aibom`, `graph` (`graph_kind: lineage`), `vulnerabilities` and
+`provenance`. Pickle files are inspected with `pickletools` opcode parsing only, and custom code
+is listed but never imported. `static` findings (such as a pickle that imports `os.system`) are
+suspicious signals and carry no CVSS. They are separate from `vulnerability` findings.
+
+What a model scan does not do:
+- Only public, non-gated repositories can be scanned. No Hugging Face token is used.
+- LFS files over `HF_MAX_FILE_MB` are listed but not downloaded. Their hash is the one the Hub reports, marked unverified.
+- Signature and attestation files are detected by name only, so `signed` stays `null`.
+- OSV lookups cover only exactly pinned (`name==version`) runtime requirements.
+- GGUF and ONNX files are identified but their internals are not parsed.
+
+In provenance fields, `null` means "could not be determined", never "no".
+
 Input safety:
-- URLs: https only, `github.com` allowlist, and the host must resolve to a public IP.
+- URLs: https only, `github.com` or `huggingface.co` allowlist, and the host must resolve to a public IP. Hugging Face download redirects may only go to a fixed list of Hugging Face hosts.
 - ZIPs: rejected for path traversal, absolute paths, symlinks, special files, encryption, duplicate entries, decompression bombs, or size and file-count limits.
 - git: shallow clone, hooks, submodules, redirects and LFS disabled, with a timeout and size cap.
 

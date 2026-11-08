@@ -77,6 +77,8 @@ def test_api_scan_with_real_syft(test_settings, session_factory, public_dns):
     graph = client.get(f"/api/v1/scans/{body['scan_id']}/graph").json()
     assert graph["is_mock"] is False
     assert graph["features"]["transitive_resolution"] == "none"
-    findings = client.get(f"/api/v1/scans/{body['scan_id']}/findings").json()
+    findings = client.get(
+        f"/api/v1/scans/{body['scan_id']}/findings", params={"category": "vulnerability"}
+    ).json()
     # Vulnerabilities came from the mock provider, so they stay labeled mock.
     assert findings["total"] >= 1 and all(i["is_mock"] for i in findings["items"])

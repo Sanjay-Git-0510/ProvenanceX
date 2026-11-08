@@ -97,6 +97,7 @@ def test_settings(tmp_path) -> Settings:
         sbom_provider="mock",
         vuln_provider="mock",
         nvd_enabled=False,
+        hf_provider="mock",
     )
 
 

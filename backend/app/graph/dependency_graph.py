@@ -9,6 +9,11 @@ Structure:
   (origin="inferred_top_level"). Packages reachable only through a cycle are also
   linked to the root ("inferred_unreachable"), so every package has a depth.
 
+Project root package: Syft lists a lockfile project's own package (e.g. the root entry of
+package-lock.json) as an ordinary component. When ingestion identified that package from
+the top-level manifest (`project_refs`), it is merged into the artifact root: it gets no
+package node, and its declared dependencies become the root's direct dependencies.
+
 Edge relation: `depends_on` for root -> package, and `transitive_depends_on` for every
 package -> package edge (the artifact reaches those through another package).
 
@@ -55,11 +60,21 @@ def build_dependency_graph(
     components: Sequence[ComponentLike],
     edges: Iterable[tuple[str, str]],
     root_ref: str | None = None,
+    project_refs: frozenset[str] = frozenset(),
 ) -> DependencyGraph:
     """Build the graph and compute structural features (vulnerability features come later)."""
     g = nx.DiGraph()
     g.add_node(ROOT_KEY, node_type="artifact", label=root_label)
+    root_packages = [
+        {"bom_ref": c.bom_ref, "name": c.name, "version": c.version, "purl": c.purl}
+        for c in components
+        if c.bom_ref in project_refs
+    ]
+    if root_packages:
+        g.nodes[ROOT_KEY]["root_packages"] = root_packages
     for comp in components:
+        if comp.bom_ref in project_refs:
+            continue
         g.add_node(
             comp.bom_ref,
             node_type=_node_type(comp.component_type),
@@ -69,13 +84,13 @@ def build_dependency_graph(
             purl=comp.purl,
             ecosystem=comp.ecosystem,
         )
-    packages = [c.bom_ref for c in components]
+    packages = [c.bom_ref for c in components if c.bom_ref not in project_refs]
 
     sbom_pkg_edges = 0
     for src, dst in edges:
         if dst not in g or dst == ROOT_KEY:
             continue
-        if src == root_ref and root_ref is not None:
+        if (src == root_ref and root_ref is not None) or src in project_refs:
             g.add_edge(ROOT_KEY, dst, relation="depends_on", origin="sbom")
         elif src in g:
             g.add_edge(src, dst, relation="transitive_depends_on", origin="sbom")
@@ -93,7 +108,9 @@ def build_dependency_graph(
             g.add_edge(ROOT_KEY, node, relation="depends_on", origin="inferred_unreachable")
             reachable |= nx.descendants(g, node) | {node}
 
-    return DependencyGraph(graph=g, features=_structural_features(g, packages, sbom_pkg_edges))
+    features = _structural_features(g, packages, sbom_pkg_edges)
+    features["root_package_count"] = len(root_packages)
+    return DependencyGraph(graph=g, features=features)
 
 
 def _structural_features(g: nx.DiGraph, packages: list[str], sbom_pkg_edges: int) -> dict[str, Any]:

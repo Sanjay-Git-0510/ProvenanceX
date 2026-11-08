@@ -69,11 +69,12 @@ Each external integration sits behind a small interface (`typing.Protocol`) and 
 |---|---|---|
 | SBOM | Syft CLI → CycloneDX JSON (`app/scanners/sbom/syft.py`) | recorded Syft SBOM (`app/scanners/sbom/mock.py`) |
 | Vulnerabilities | OSV querybatch + `/v1/vulns/{id}` (`app/scanners/vulns/osv.py`), NVD CVE API for missing CVSS only (`nvd.py`) | recorded real OSV records (`app/scanners/vulns/mock.py`) |
+| Hugging Face | Hub API + capped, verified download (`app/scanners/hf/client.py`) | synthetic benign fixture repo (`app/scanners/hf/mock.py`) |
 | Sandbox | Docker SDK | fixture telemetry |
 | Chain | web3.py → Hardhat | in-memory ledger |
 
 Mock output always carries `source="mock"`. The API returns that tag (`is_mock`, `contains_mock`)
-and the UI shows it. Providers are chosen with env vars (`SBOM_PROVIDER`, `VULN_PROVIDER`) and
+and the UI shows it. Providers are chosen with env vars (`SBOM_PROVIDER`, `VULN_PROVIDER`, `HF_PROVIDER`) and
 built by `app/pipeline/providers.py`. **A mock is never a silent fallback.** If a real tool or
 service is missing, the stage is recorded as `unavailable`.
 When no trained model exists, the pipeline uses the rule-based score and reports
@@ -108,10 +109,67 @@ raises, and it never swallows an exception without logging it.
   features `vulnerable_count`, `vulnerability_count` and `cvss_max`. If the lookup did not run,
   these stay `null`. They are never reported as 0.
 
-Known limitations: Syft reports a lockfile project's own package (e.g. the root entry of
-`package-lock.json`) as a component, so that package's direct dependencies appear at depth 2. It
-is also queried in OSV, so a public package with the same name and version could produce
-unrelated advisories. Lockfiles that list dev or test dependencies are included as-is.
+- **Root package.** Syft reports a lockfile project's own package (e.g. the root entry of
+  `package-lock.json`) as a component. `detect_project_packages` reads the name and version from
+  the top-level `package.json` or `pyproject.toml`. A component with the same ecosystem, name and
+  version is merged into `artifact:root`, so direct dependencies are at depth 1, and it is left
+  out of OSV queries. A manifest without a version matches on the name alone.
+
+Known limitation: lockfiles that list dev or test dependencies are included as-is.
+
+### Phase 3 AI/ML evidence stages
+
+`POST /api/v1/scans/model` runs `app/pipeline/model.py`, which shares its failure and cleanup
+handling with the software pipeline (`app/pipeline/lifecycle.py`). Nothing from the artifact is
+executed, imported or deserialized. No `torch`, `safetensors` or `huggingface_hub` library is
+used, and a test (`tests/security/test_model_inputs.py`) fails if `app/` imports one.
+
+- **Hugging Face fetch (`app/scanners/hf/client.py`).**
+  - The host is fixed in code, and no token is sent. Gated or private repositories return
+    `hf_access_denied`.
+  - Redirects are followed manually, at most 5 hops. Each hop must be https, with no credentials,
+    port or IP literal. Its host must be on the fixed list in `url_validation.py` (the
+    `cdn-lfs*.huggingface.co` and `cas-bridge.xethub.hf.co` hosts, or any `*.hf.co` host), and
+    every address it resolves to must be public.
+  - Listing paths are validated like ZIP entries. Files are written with `O_EXCL` under
+    `workspace/src`, smallest first, with per-file, total and time budgets.
+  - Each download is verified against the Hub listing (LFS SHA-256 or git blob SHA-1). A mismatch
+    deletes the file and becomes a HIGH provenance finding.
+  - `hf_manifest_digest` covers the full remote listing, including files too large to download.
+- **AI-BOM (`aibom` stage).** `app/scanners/model/` builds the file inventory and detects the
+  serialization format from magic bytes. It parses safetensors headers with bounds checks, scans
+  pickles and PyTorch ZIP members with `pickletools.genops`, and reads configs, adapter metadata,
+  model cards (`yaml.SafeLoader`, anchors and aliases rejected) and custom-code listings. The
+  document is stored off-chain at `<workspace>/aibom.json` (mode 0600). Its SHA-256 is
+  `Scan.bom_sha256`, the same `bom_hash` slot an SBOM uses. Static findings are
+  `category="static"` with no CVSS.
+- **Lineage graph (`graph` stage, `graph_kind="lineage"`).** Node keys are `model:`, `dataset:`,
+  `adapter:`, `config:`, `file:` and `package:`. Edges are `derived_from`, `fine_tuned_from`,
+  `trained_on`, `bundled_with` and `requires`, each with an `origin`. Features include
+  `lineage_completeness` (a research heuristic) and `suspicious_lineage` rule flags.
+- **Vulnerabilities.** OSV runs on exactly pinned runtime requirements. With no pinned
+  requirement, the stage is `skipped` with a reason.
+- **Provenance (`app/provenance/checks.py`, both pipelines).** Each check is
+  `pass | fail | unknown | info`, and only `fail` becomes a Finding. The canonical record is stored
+  at `<workspace>/provenance.json` (mode 0600). Its SHA-256 is `ProvenanceRecord.record_sha256`,
+  which becomes `provenance_hash` in Phase 7. `hash_changed` compares with the most recent earlier
+  completed scan of the same source and is `null` when there is none. A changed hash on the same
+  commit is a HIGH failure. A changed hash on a new commit is `info`.
+
+Known limitations:
+- Weights over `HF_MAX_FILE_MB` or the total budget are not hashed locally. They carry the
+  Hub-reported hash, marked unverified, and a `content_coverage: unknown` check.
+- Signature and attestation files are detected by name and not verified, so `signed` is `null`.
+- Gated and private repositories are unsupported.
+- OSV covers only exactly pinned runtime requirements.
+- GGUF and ONNX files are identified but their internals are not parsed.
+- Deep analysis of bundled Python code (AST) is Phase 4. Phase 3 records only that it is present.
+- The Hugging Face download redirect allowlist accepts any `*.hf.co` host (up to 5 dots in the
+  name), accepted for the MVP because Hugging Face CDN hostnames vary. Any host under `hf.co` is
+  trusted as a download source, so the control relies on Hugging Face's ownership of that domain.
+  The https, no-credentials, no-port, no-IP-literal and public-address checks still apply to
+  every hop, and downloaded content is verified against the Hub listing.
+- Hugging Face downloads follow up to 5 redirect hops (`MAX_REDIRECTS`), accepted for the MVP.
 
 ## 5. Data model (PostgreSQL)
 
@@ -123,7 +181,7 @@ unrelated advisories. Lockfiles that list dev or test dependencies are included 
 | Component | id, scan_id, bom_ref, name, version, component_type, ecosystem, purl, licenses, source, properties | 2 |
 | Finding | id, scan_id, component_id, category (vulnerability/static/behavioral/provenance), identifier, aliases, title, severity, severity_source, cvss_score, cvss_vector, cvss_version, source, details | 2 |
 | GraphNode / GraphEdge | scan_id, node_key, node_type, label, component_id, attributes / source_key, target_key, relation, origin | 2–3 |
-| ProvenanceRecord | id, scan_id, source_known, signed, provenance_present, hash_changed, lineage_completeness | 2–3 |
+| ProvenanceRecord | id, scan_id, source_known, revision_pinned, resolved_commit, signed, signature_files_present, provenance_present, hash_changed, previous_scan_id, lineage_completeness, checks, record_sha256, source | 3 |
 | RiskDecision | scan_id, risk_score, decision, layer_scores, ml_probability, anomaly_score, model_version, explanation | 6 |
 | BlockchainEvidence | scan_id, tx_hash, artifact_hash, bom_hash, provenance_hash, block_number, anchored_at | 7 |
 

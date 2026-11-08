@@ -36,7 +36,9 @@ class StageStatus(StrEnum):
 
 
 SUCCESS_STATUSES = frozenset({StageStatus.COMPLETED, StageStatus.PARTIAL})
-UNAVAILABLE_CODES = frozenset({ErrorCode.SBOM_TOOL_UNAVAILABLE, ErrorCode.VULN_SOURCE_UNAVAILABLE})
+UNAVAILABLE_CODES = frozenset(
+    {ErrorCode.SBOM_TOOL_UNAVAILABLE, ErrorCode.VULN_SOURCE_UNAVAILABLE, ErrorCode.HF_UNAVAILABLE}
+)
 
 
 def _iso(value: datetime | None) -> str | None:

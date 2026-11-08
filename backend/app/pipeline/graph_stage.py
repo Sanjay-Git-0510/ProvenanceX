@@ -25,7 +25,13 @@ def run_graph_stage(
 ) -> dict[str, Any] | None:
     def body(scan: Scan) -> tuple[dict[str, Any], StageStatus, dict[str, Any]]:
         parsed = sbom.parsed
-        dg = build_dependency_graph(root_label, parsed.components, parsed.edges, parsed.root_ref)
+        dg = build_dependency_graph(
+            root_label,
+            parsed.components,
+            parsed.edges,
+            parsed.root_ref,
+            project_refs=sbom.root_package_refs,
+        )
         for key, data in dg.graph.nodes(data=True):
             session.add(
                 GraphNode(
@@ -50,6 +56,7 @@ def run_graph_stage(
         resolution = dg.features["transitive_resolution"]
         fields: dict[str, Any] = {
             "source": sbom.source,
+            "graph_kind": "dependency",
             "edges_source": "sbom",
             "features": dg.features,
             "counts": {

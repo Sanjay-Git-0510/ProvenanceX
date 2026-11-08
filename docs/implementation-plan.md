@@ -41,7 +41,11 @@ Migration `0003`. See architecture.md §4 "Phase 2 evidence stages" for the deta
 - A NetworkX builder (`depends_on`, `transitive_depends_on`) and graph features: dependency_count, transitive_depth, centrality
 - `GraphNode`/`GraphEdge` models and the `/findings` and `/graph` endpoints
 
-## Phase 3: AI/model ingestion
+## Phase 3: AI/model ingestion ✅
+As built, a model scan runs the stages `aibom`, `graph` (`graph_kind="lineage"`), `vulnerabilities` and `provenance`.
+The provenance stage also runs for software scans, and the root-package cleanup is included. Migration `0004`.
+See architecture.md §4 "Phase 3 AI/ML evidence stages" for the details and known limitations.
+
 - Hugging Face fetch: metadata through the API plus an allowlisted file download, with no code execution
 - File inventory and serialization detection (safetensors, pickle, PT, ONNX, GGUF, and so on)
 - Pickle opcode scanning with `pickletools`

@@ -1,4 +1,4 @@
-"""Dependency graph API schemas."""
+"""Graph API schemas: software dependency graph and AI model-lineage graph."""
 
 from typing import Any
 from uuid import UUID
@@ -18,13 +18,17 @@ class GraphEdgeOut(BaseModel):
     source: str
     target: str
     relation: str
-    origin: str  # sbom | inferred_top_level | inferred_unreachable
+    # dependency: sbom | inferred_top_level | inferred_unreachable
+    # lineage: adapter_config | model_card | config | inventory | requirements
+    origin: str
+    attributes: dict[str, Any] | None = None
 
 
 class GraphResponse(BaseModel):
     scan_id: UUID
     root_key: str
-    source: str | None  # syft | mock (from the SBOM stage)
+    graph_kind: str | None  # dependency | lineage (None if the graph stage did not run)
+    source: str | None  # syft | aibom | mock
     is_mock: bool
     nodes: list[GraphNodeOut]
     edges: list[GraphEdgeOut]

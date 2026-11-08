@@ -2,7 +2,7 @@
 
 Domain tables are added in the phase that first uses them:
 Artifact, Scan (Phase 1); Component, Finding, GraphNode, GraphEdge (Phase 2);
-ProvenanceRecord (Phase 2/3); RiskDecision (Phase 6); BlockchainEvidence (Phase 7).
+ProvenanceRecord (Phase 3); RiskDecision (Phase 6); BlockchainEvidence (Phase 7).
 
 Column types are portable (Uuid, JSON->JSONB on PostgreSQL, non-native enums with CHECK
 constraints), so the API tests can run on SQLite while production uses PostgreSQL.
@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -131,6 +132,9 @@ class Scan(Base):
     graph_edges: Mapped[list["GraphEdge"]] = relationship(
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
+    provenance: Mapped["ProvenanceRecord | None"] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Component(Base):
@@ -227,3 +231,36 @@ class GraphEdge(Base):
     attributes: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
 
     scan: Mapped[Scan] = relationship(back_populates="graph_edges")
+
+
+class ProvenanceRecord(Base):
+    """Provenance/integrity evidence for one scan (pipeline step 8).
+
+    Tri-state booleans: None means "could not be determined", never "no". `signed` stays
+    None until signatures are actually verified; detected signature or attestation files
+    are reported separately. `record_sha256` is the SHA-256 of the canonical record JSON
+    and becomes `provenance_hash` when evidence is anchored (Phase 7).
+    """
+
+    __tablename__ = "provenance_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    source_known: Mapped[bool] = mapped_column(Boolean)
+    revision_pinned: Mapped[bool] = mapped_column(Boolean)
+    resolved_commit: Mapped[str | None] = mapped_column(String(64))
+    signed: Mapped[bool | None] = mapped_column(Boolean)
+    signature_files_present: Mapped[bool] = mapped_column(Boolean)
+    provenance_present: Mapped[bool] = mapped_column(Boolean)
+    hash_changed: Mapped[bool | None] = mapped_column(Boolean)
+    previous_scan_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    lineage_completeness: Mapped[float | None] = mapped_column(Float)
+    checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONType)
+    record_sha256: Mapped[str] = mapped_column(String(64))
+    # Producer of the record: "provenancex" (rule checks over collected evidence).
+    source: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    scan: Mapped[Scan] = relationship(back_populates="provenance")

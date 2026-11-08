@@ -28,8 +28,17 @@ STAGE = "vulnerabilities"
 
 def build_queries(sbom: SbomStageOutput) -> tuple[list[PackageQuery], dict[str, int]]:
     queries: list[PackageQuery] = []
-    skipped = {"packages_without_purl": 0, "packages_without_version": 0}
+    skipped = {
+        "packages_without_purl": 0,
+        "packages_without_version": 0,
+        "project_root_packages": 0,
+    }
     for comp in sbom.parsed.components:
+        if comp.bom_ref in sbom.root_package_refs:
+            # The scanned project itself: a public package with the same name/version
+            # would produce unrelated advisories.
+            skipped["project_root_packages"] += 1
+            continue
         purl = normalize_query_purl(comp.purl, comp.version)
         if not comp.purl:
             skipped["packages_without_purl"] += 1
