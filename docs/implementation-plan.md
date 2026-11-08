@@ -78,3 +78,17 @@ Migration `0003`. See architecture.md §4 "Phase 2 evidence stages" for the deta
 ## Phase 9: CI gate and end-to-end
 - A GitHub Actions gate that fails only on BLOCK (REVIEW is optional)
 - End-to-end fixtures, the full test run, demo instructions, and pinned dependencies
+
+### Cleanup
+- **Root-package OSV lookup (from Phase 2).** Syft lists a lockfile project's own package (for
+  example the root `""` entry of `package-lock.json`) as an ordinary component. That causes two
+  problems:
+  - It is queried in OSV, so a public package with the same name and version can produce
+    unrelated advisories.
+  - In the graph it becomes a top-level node, so the project's direct dependencies appear at
+    depth 2.
+
+  Detect the project's own package from the manifest name and version (for example
+  `package.json` `name`/`version`, or `pyproject.toml` `[project]`) and treat it as the artifact
+  root. Leave it out of the OSV lookup. Add a fixture test that covers both effects. See
+  `docs/architecture.md` §4, "Known limitations".
