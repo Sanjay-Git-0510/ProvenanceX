@@ -56,6 +56,10 @@ _Last updated: 2026-11-08_
       the pinned `requests==2.32.3`.
     - npm fixture ZIP: root package `demo-app` merged, `express` at depth 1, 3 packages queried
       with `project_root_packages: 1`, 10 OSV findings.
+- **Phase 4 (static analysis, telemetry parser, Docker sandbox, security hardening): complete and
+  committed.** Milestones A, B and C plus the post-review hardening are done. Final results:
+  `pytest -m "not network and not sandbox"` 1477 passed, 0 skipped;
+  `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox` 35 passed. Details are under "Phase 4 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -89,7 +93,7 @@ anything.
 
 ## Phase 4 progress
 
-- **Milestone C (Docker sandbox): complete, uncommitted on `main`. Awaiting review.**
+- **Milestone C (Docker sandbox) and post-review hardening: complete and committed.**
   - New optional stage `sandbox` (pipeline step 10). `SANDBOX_PROVIDER=disabled` is the default;
     `mock` is labeled `source="mock"` and is never a fallback.
   - Build the image: `docker build -t provenancex-sandbox:0.1.0 docker/sandbox`. It uses a base image
