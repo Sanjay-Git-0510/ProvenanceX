@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-provenancex}
       POSTGRES_DB: ${POSTGRES_DB:-provenancex}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -44,6 +44,11 @@ services:
       API_PROXY_TARGET: http://api:8000
     ports:
       - "127.0.0.1:5173:5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       api:
         condition: service_healthy
