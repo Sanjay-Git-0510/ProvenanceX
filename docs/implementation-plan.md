@@ -30,7 +30,11 @@ As built, the scan endpoint takes a multipart form and runs ingestion as a backg
 - `POST /api/v1/scans/software` (URL or ZIP upload), `GET /api/v1/scans/{id}`
 - **Tests:** hashing vectors, malicious ZIP fixtures generated in the tests, bad URLs (http, other hosts, IP literals, userinfo tricks), oversize, timeout, and API integration
 
-## Phase 2: SBOM, vulnerabilities and dependency graph
+## Phase 2: SBOM, vulnerabilities and dependency graph ✅
+As built, the evidence stages run after ingestion in the same background task, and each one records its status in `Scan.stages`.
+A failed stage does not fail the scan. Syft 1.57.0 is pinned and checksum-verified in the API image and in CI.
+Migration `0003`. See architecture.md §4 "Phase 2 evidence stages" for the details and known limitations.
+
 - A Syft adapter (CLI to CycloneDX JSON) with a mock, and a CycloneDX parser that produces `Component` records
 - OSV (batch query) and NVD adapters with mocks. They keep the source, ID, severity and CVSS, and use timeouts and retries.
 - `Finding` records with `category="vulnerability"`

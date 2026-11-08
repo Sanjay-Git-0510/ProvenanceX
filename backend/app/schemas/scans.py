@@ -61,10 +61,17 @@ class ScanResponse(BaseModel):
     finished_at: datetime | None
     artifact: ArtifactRecord
     ingest: IngestSummary | None
+    # Per-stage evidence status (sbom, graph, vulnerabilities). See app/pipeline/stages.py.
+    stages: dict[str, Any] | None = None
+    bom_sha256: str | None = None
+    component_count: int = 0
+    finding_count: int = 0
     error: ScanErrorOut | None
 
     @classmethod
-    def from_scan(cls, scan: Scan) -> "ScanResponse":
+    def from_scan(
+        cls, scan: Scan, component_count: int = 0, finding_count: int = 0
+    ) -> "ScanResponse":
         artifact = scan.artifact
         error = (
             ScanErrorOut(
@@ -94,5 +101,9 @@ class ScanResponse(BaseModel):
             ingest=IngestSummary.model_validate(scan.ingest_metadata)
             if scan.ingest_metadata
             else None,
+            stages=scan.stages,
+            bom_sha256=scan.bom_sha256,
+            component_count=component_count,
+            finding_count=finding_count,
             error=error,
         )

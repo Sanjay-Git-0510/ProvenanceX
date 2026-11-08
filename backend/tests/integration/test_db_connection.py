@@ -44,7 +44,7 @@ def test_alembic_upgrade_head(engine):
     head = ScriptDirectory.from_config(cfg).get_current_head()
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert head == "0002"  # bump when a new migration is added
+    assert head == "0003"  # bump when a new migration is added
     assert version == head
 
 
@@ -53,6 +53,15 @@ def test_phase1_tables_exist_after_upgrade(engine):
 
     tables = set(inspect(engine).get_table_names())
     assert {"artifacts", "scans"} <= tables
+
+
+def test_phase2_tables_exist_after_upgrade(engine):
+    from sqlalchemy import inspect
+
+    insp = inspect(engine)
+    assert {"components", "findings", "graph_nodes", "graph_edges"} <= set(insp.get_table_names())
+    scan_cols = {c["name"] for c in insp.get_columns("scans")}
+    assert {"stages", "bom_sha256"} <= scan_cols
 
 
 def test_readiness_endpoint_with_real_db(engine):

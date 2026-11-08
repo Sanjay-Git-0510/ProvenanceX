@@ -27,6 +27,11 @@ services:
       MAX_ARTIFACT_SIZE_MB: ${MAX_ARTIFACT_SIZE_MB:-200}
       MAX_ARTIFACT_FILES: ${MAX_ARTIFACT_FILES:-20000}
       WORKSPACE_ROOT: /app/workspace
+      SBOM_PROVIDER: ${SBOM_PROVIDER:-syft}
+      VULN_PROVIDER: ${VULN_PROVIDER:-osv}
+      NVD_ENABLED: ${NVD_ENABLED:-true}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      NVD_MAX_LOOKUPS: ${NVD_MAX_LOOKUPS:-10}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

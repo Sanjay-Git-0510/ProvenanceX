@@ -1,4 +1,4 @@
-"""Scan endpoints (Phase 1: software ingestion)."""
+"""Scan endpoints: software ingestion (Phase 1), findings and dependency graph (Phase 2)."""
 
 import logging
 import re
@@ -6,15 +6,31 @@ from pathlib import PurePosixPath
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
-from sqlalchemy.orm import Session, sessionmaker
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.db.database import get_sessionmaker
-from app.db.models import Artifact, ArtifactSource, ArtifactType, Scan, ScanStatus
+from app.db.models import (
+    Artifact,
+    ArtifactSource,
+    ArtifactType,
+    Component,
+    Finding,
+    FindingCategory,
+    GraphEdge,
+    GraphNode,
+    Scan,
+    ScanStatus,
+)
+from app.graph.dependency_graph import ROOT_KEY
+from app.pipeline.providers import ScanProviders, build_providers
 from app.pipeline.software import run_software_ingestion
 from app.pipeline.workspace import MB, create_workspace, remove_workspace, write_stream_limited
+from app.schemas.findings import FindingOut, FindingsResponse, Severity
+from app.schemas.graph import GraphEdgeOut, GraphNodeOut, GraphResponse
 from app.schemas.scans import ScanCreatedResponse, ScanResponse
 from app.security.revision import validate_revision
 from app.security.url_validation import validate_github_repo_url
@@ -32,6 +48,14 @@ def get_session_factory() -> sessionmaker[Session]:
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionFactoryDep = Annotated[sessionmaker[Session], Depends(get_session_factory)]
+
+
+def get_scan_providers(settings: SettingsDep) -> ScanProviders:
+    """Dependency so tests can inject providers (SBOM/vulnerability adapters)."""
+    return build_providers(settings)
+
+
+ProvidersDep = Annotated[ScanProviders, Depends(get_scan_providers)]
 
 
 def _clean_name(name: str | None) -> str | None:
@@ -56,6 +80,7 @@ def create_software_scan(
     background_tasks: BackgroundTasks,
     settings: SettingsDep,
     session_factory: SessionFactoryDep,
+    providers: ProvidersDep,
     source_url: Annotated[str | None, Form(max_length=2048)] = None,
     revision: Annotated[str | None, Form(max_length=255)] = None,
     name: Annotated[str | None, Form(max_length=255)] = None,
@@ -109,15 +134,119 @@ def create_software_scan(
         remove_workspace(workspace, settings.workspace_root)
         raise
 
-    background_tasks.add_task(run_software_ingestion, scan_id, session_factory, settings)
+    background_tasks.add_task(run_software_ingestion, scan_id, session_factory, settings, providers)
     logger.info("Scan %s queued (source=%s)", scan_id, source)
     return ScanCreatedResponse(scan_id=scan_id, artifact_id=artifact_id, status=ScanStatus.QUEUED)
+
+
+def _get_scan_or_404(session: Session, scan_id: UUID) -> Scan:
+    scan = session.get(Scan, scan_id)
+    if scan is None:
+        raise AppError(ErrorCode.SCAN_NOT_FOUND, "Scan not found", 404)
+    return scan
+
+
+def _count(session: Session, model: type[Component] | type[Finding], scan_id: UUID) -> int:
+    return (
+        session.scalar(select(func.count()).select_from(model).where(model.scan_id == scan_id)) or 0
+    )
 
 
 @router.get("/{scan_id}", response_model=ScanResponse)
 def get_scan(scan_id: UUID, session_factory: SessionFactoryDep) -> ScanResponse:
     with session_factory() as session:
-        scan = session.get(Scan, scan_id)
-        if scan is None:
-            raise AppError(ErrorCode.SCAN_NOT_FOUND, "Scan not found", 404)
-        return ScanResponse.from_scan(scan)
+        scan = _get_scan_or_404(session, scan_id)
+        return ScanResponse.from_scan(
+            scan,
+            component_count=_count(session, Component, scan_id),
+            finding_count=_count(session, Finding, scan_id),
+        )
+
+
+@router.get("/{scan_id}/findings", response_model=FindingsResponse)
+def get_scan_findings(
+    scan_id: UUID,
+    session_factory: SessionFactoryDep,
+    category: FindingCategory | None = None,
+    severity: Severity | None = None,
+    source: Annotated[str | None, Query(max_length=16, pattern=r"^[a-z]+$")] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> FindingsResponse:
+    """Findings for a scan, highest CVSS first. Filters: category, severity, source."""
+    with session_factory() as session:
+        scan = _get_scan_or_404(session, scan_id)
+        conditions = [Finding.scan_id == scan_id]
+        if category is not None:
+            conditions.append(Finding.category == category)
+        if severity is not None:
+            conditions.append(Finding.severity == severity)
+        if source is not None:
+            conditions.append(Finding.source == source)
+        total = session.scalar(select(func.count()).select_from(Finding).where(*conditions)) or 0
+        rows = session.scalars(
+            select(Finding)
+            .where(*conditions)
+            .options(selectinload(Finding.component))
+            .order_by(Finding.cvss_score.desc().nulls_last(), Finding.identifier, Finding.id)
+            .limit(limit)
+            .offset(offset)
+        ).all()
+        contains_mock = bool(
+            session.scalar(
+                select(func.count())
+                .select_from(Finding)
+                .where(Finding.scan_id == scan_id, Finding.source == "mock")
+            )
+        )
+        return FindingsResponse(
+            scan_id=scan_id,
+            total=total,
+            limit=limit,
+            offset=offset,
+            items=[FindingOut.from_row(f) for f in rows],
+            contains_mock=contains_mock,
+            stage=(scan.stages or {}).get("vulnerabilities"),
+        )
+
+
+@router.get("/{scan_id}/graph", response_model=GraphResponse)
+def get_scan_graph(scan_id: UUID, session_factory: SessionFactoryDep) -> GraphResponse:
+    """Dependency graph (nodes, edges) plus graph features and their limitations."""
+    with session_factory() as session:
+        scan = _get_scan_or_404(session, scan_id)
+        nodes = session.scalars(
+            select(GraphNode).where(GraphNode.scan_id == scan_id).order_by(GraphNode.node_key)
+        ).all()
+        edges = session.scalars(
+            select(GraphEdge)
+            .where(GraphEdge.scan_id == scan_id)
+            .order_by(GraphEdge.source_key, GraphEdge.target_key)
+        ).all()
+        stage = (scan.stages or {}).get("graph")
+        source = (stage or {}).get("source")
+        return GraphResponse(
+            scan_id=scan_id,
+            root_key=ROOT_KEY,
+            source=source,
+            is_mock=source == "mock",
+            nodes=[
+                GraphNodeOut(
+                    key=n.node_key,
+                    node_type=n.node_type,
+                    label=n.label,
+                    component_id=n.component_id,
+                    attributes=n.attributes or {},
+                )
+                for n in nodes
+            ],
+            edges=[
+                GraphEdgeOut(
+                    source=e.source_key, target=e.target_key, relation=e.relation, origin=e.origin
+                )
+                for e in edges
+            ],
+            features=(stage or {}).get("features"),
+            limitations=list((stage or {}).get("limitations") or []),
+            stage=stage,
+        )

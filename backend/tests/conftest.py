@@ -93,6 +93,10 @@ def test_settings(tmp_path) -> Settings:
         max_artifact_files=50,
         max_compression_ratio=100,
         git_clone_timeout_seconds=10,
+        # Phase 2: deterministic, offline providers (output is tagged source="mock").
+        sbom_provider="mock",
+        vuln_provider="mock",
+        nvd_enabled=False,
     )
 
 

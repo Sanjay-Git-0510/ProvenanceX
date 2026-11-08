@@ -24,7 +24,7 @@ The development machine is Windows with WSL2 Ubuntu. Keep the repo on the Linux 
 | Python | 3.12 recommended | Containers use 3.12. Local 3.14 works for Phase 0. |
 | Node.js | 22 LTS or newer | For the frontend |
 | Git | any | |
-| Syft | — | Needed from Phase 2. A mock provider is used if it is missing. |
+| Syft | 1.57.0 (pinned) | SBOM generation. Already in the API Docker image. For local runs, install it on `PATH` ([releases](https://github.com/anchore/syft/releases)). If it is missing, the SBOM stage reports `unavailable`. It never falls back to mock data silently. Set `SBOM_PROVIDER=mock` to choose the labeled mock explicitly. |
 
 ## Quickstart (Docker)
 
@@ -62,7 +62,12 @@ cd frontend && npm run build
 ```
 
 Backend integration tests (`-m integration`) need a reachable PostgreSQL at `DATABASE_URL`.
-Without one they are **skipped with an explicit reason**. In CI they run against a Postgres service, and any skip fails the build.
+Without one they are **skipped with an explicit reason**. The real-Syft tests
+(`tests/integration/test_syft_real.py`) are skipped when Syft is not on `PATH`. In CI, Postgres
+and a pinned Syft are both available, and any skip fails the build.
+
+Live-internet tests (marker `network`: GitHub clone, OSV, NVD) run only with
+`PROVENANCEX_NETWORK_TESTS=1`. CI deselects them with `-m "not network"`.
 
 ## API
 
@@ -71,7 +76,9 @@ Without one they are **skipped with an explicit reason**. In CI they run against
 | GET | `/api/v1/health` | Liveness: `{status, version}` |
 | GET | `/api/v1/health/ready` | Readiness (DB check). Returns 503 with `{"error": {...}}` when the DB is down. |
 | POST | `/api/v1/scans/software` | Start a software scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
-| GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, and a structured error if the scan failed |
+| GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, per-stage evidence status (`stages`), `bom_sha256`, component and finding counts, and a structured error if the scan failed |
+| GET | `/api/v1/scans/{scan_id}/findings` | Findings, highest CVSS first. Filters: `category`, `severity`, `source`, `limit`, `offset`. Each item has a separate `cvss` object, `source` and `is_mock`. |
+| GET | `/api/v1/scans/{scan_id}/graph` | Dependency graph nodes and edges, graph features, `limitations`, and `is_mock` |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
 
@@ -94,6 +101,14 @@ The scan runs in the background. Its status moves `queued → running → comple
 `artifact.sha256` is a deterministic **content digest** (`provenancex-tree-v1`; see
 `backend/app/core/hashing.py`), so the same files produce the same hash whether they came from a ZIP or a git clone.
 For uploads, `ingest.archive_sha256` is the hash of the raw ZIP bytes.
+
+Evidence stages (Phase 2) run after ingestion: `sbom` (Syft → CycloneDX → components),
+`graph` (NetworkX), and `vulnerabilities` (OSV, plus NVD to fill in missing CVSS). Each stage
+records `status` (`completed | partial | unavailable | error | skipped`), `provider`, and `source`
+under `stages`. A scan can be `completed` while a stage is `unavailable`, for example when Syft is
+missing or OSV cannot be reached. An empty findings list then does **not** mean "no vulnerabilities".
+CVSS scores are advisory severity. They are not the ProvenanceX risk score (Phase 6), and a known
+vulnerability is not evidence of malice.
 
 Input safety:
 - URLs: https only, `github.com` allowlist, and the host must resolve to a public IP.

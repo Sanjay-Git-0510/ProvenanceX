@@ -34,13 +34,29 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      # Pinned, checksum-verified Syft (same version/hash as backend/Dockerfile).
+      # The real-Syft integration tests need it, and CI fails on any skipped test.
+      - name: Install Syft
+        env:
+          SYFT_VERSION: "1.57.0"
+          SYFT_SHA256: "9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704"
+        run: |
+          set -eu
+          tarball="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "/tmp/${tarball}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${tarball}"
+          echo "${SYFT_SHA256}  /tmp/${tarball}" | sha256sum -c -
+          sudo tar -xzf "/tmp/${tarball}" -C /usr/local/bin syft
+          syft version
       - run: ruff check . && ruff format --check .
       - run: alembic upgrade head
-      # Postgres is available here, so integration tests must actually run: fail on any skip.
+      # Postgres and Syft are available here, so integration tests must actually run: fail on
+      # any skip. Live-internet tests (marker "network") are deselected, not skipped. Run them
+      # locally with PROVENANCEX_NETWORK_TESTS=1.
       - name: pytest (no skips allowed)
         run: |
           set -o pipefail
-          pytest -q -rs | tee pytest.out
+          pytest -q -rs -m "not network" | tee pytest.out
           if grep -qE '[0-9]+ skipped' pytest.out; then echo "::error::tests were skipped in CI"; exit 1; fi
 
   frontend:

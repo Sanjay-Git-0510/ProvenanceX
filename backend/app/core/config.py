@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -31,8 +31,25 @@ class Settings(BaseSettings):
     max_compression_ratio: float = Field(default=100.0, gt=1)
     git_clone_timeout_seconds: int = Field(default=120, gt=0)
 
+    # --- SBOM (Phase 2). "mock" serves a recorded fixture SBOM tagged source="mock".
+    sbom_provider: Literal["syft", "mock"] = "syft"
+    syft_path: str = "syft"
+    syft_timeout_seconds: int = Field(default=300, gt=0)
+    max_sbom_mb: int = Field(default=50, gt=0)
+    max_sbom_components: int = Field(default=50000, gt=0)
+
+    # --- Vulnerability intelligence (Phase 2). "mock" serves recorded OSV data, source="mock".
+    vuln_provider: Literal["osv", "mock"] = "osv"
     osv_api_base: str = "https://api.osv.dev"
-    nvd_api_key: str = ""
+    osv_timeout_seconds: float = Field(default=20.0, gt=0)
+    osv_max_detail_lookups: int = Field(default=500, gt=0)
+    nvd_enabled: bool = True
+    nvd_api_base: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    nvd_api_key: str = Field(default="", repr=False)
+    nvd_timeout_seconds: float = Field(default=20.0, gt=0)
+    nvd_max_lookups: int = Field(default=10, ge=0)
+    http_max_retries: int = Field(default=2, ge=0, le=5)
+    http_max_response_mb: int = Field(default=10, gt=0)
 
     sandbox_timeout_seconds: int = Field(default=60, gt=0)
     model_path: Path = Path("./ml/models")

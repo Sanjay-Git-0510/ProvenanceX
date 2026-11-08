@@ -13,7 +13,18 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +52,13 @@ class ScanStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class FindingCategory(StrEnum):
+    VULNERABILITY = "vulnerability"
+    STATIC = "static"
+    BEHAVIORAL = "behavioral"
+    PROVENANCE = "provenance"
 
 
 def _enum(enum_cls: type[StrEnum], name: str) -> Enum:
@@ -91,8 +109,121 @@ class Scan(Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     error_message: Mapped[str | None] = mapped_column(Text)
     error_details: Mapped[Any | None] = mapped_column(JSONType)
+    # Per-stage status of the Phase 2+ pipeline (sbom, graph, vulnerabilities, ...).
+    # Each entry: {status, provider, source, started_at, finished_at, error, counts, ...}.
+    stages: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+    # SHA-256 of the raw SBOM document as produced (off-chain file; hash anchored in Phase 7).
+    bom_sha256: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     artifact: Mapped[Artifact] = relationship(back_populates="scans")
+    components: Mapped[list["Component"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    findings: Mapped[list["Finding"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    graph_nodes: Mapped[list["GraphNode"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    graph_edges: Mapped[list["GraphEdge"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class Component(Base):
+    """A package/component enumerated from the SBOM (one row per SBOM component per scan)."""
+
+    __tablename__ = "components"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    bom_ref: Mapped[str] = mapped_column(String(2048))
+    name: Mapped[str] = mapped_column(String(1024))
+    version: Mapped[str | None] = mapped_column(String(512))
+    component_type: Mapped[str] = mapped_column(String(32))
+    ecosystem: Mapped[str | None] = mapped_column(String(64))
+    purl: Mapped[str | None] = mapped_column(String(2048))
+    licenses: Mapped[list[str] | None] = mapped_column(JSONType)
+    # Which tool produced the record: "syft" or "mock".
+    source: Mapped[str] = mapped_column(String(16))
+    properties: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+
+    scan: Mapped[Scan] = relationship(back_populates="components")
+
+
+class Finding(Base):
+    """A piece of evidence. Phase 2 writes category=vulnerability (known advisories).
+
+    cvss_score is the advisory's CVSS base score. It is NOT the ProvenanceX risk score and
+    a vulnerable component is not evidence of malicious intent.
+    """
+
+    __tablename__ = "findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    component_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("components.id", ondelete="SET NULL"), index=True
+    )
+    category: Mapped[FindingCategory] = mapped_column(
+        _enum(FindingCategory, "finding_category"), index=True
+    )
+    identifier: Mapped[str] = mapped_column(String(128))
+    aliases: Mapped[list[str] | None] = mapped_column(JSONType)
+    title: Mapped[str | None] = mapped_column(String(512))
+    severity: Mapped[str] = mapped_column(String(16), index=True)
+    severity_source: Mapped[str | None] = mapped_column(String(32))
+    cvss_score: Mapped[float | None] = mapped_column(Float)
+    cvss_vector: Mapped[str | None] = mapped_column(String(255))
+    cvss_version: Mapped[str | None] = mapped_column(String(8))
+    # Provider that produced the finding: "osv", "nvd" or "mock".
+    source: Mapped[str] = mapped_column(String(16), index=True)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    scan: Mapped[Scan] = relationship(back_populates="findings")
+    component: Mapped[Component | None] = relationship()
+
+
+class GraphNode(Base):
+    __tablename__ = "graph_nodes"
+    __table_args__ = (UniqueConstraint("scan_id", "node_key", name="uq_graph_nodes_scan_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(2048))
+    node_type: Mapped[str] = mapped_column(String(32))
+    label: Mapped[str] = mapped_column(String(1024))
+    component_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("components.id", ondelete="SET NULL")
+    )
+    attributes: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+
+    scan: Mapped[Scan] = relationship(back_populates="graph_nodes")
+
+
+class GraphEdge(Base):
+    __tablename__ = "graph_edges"
+    __table_args__ = (Index("ix_graph_edges_scan_source", "scan_id", "source_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    source_key: Mapped[str] = mapped_column(String(2048))
+    target_key: Mapped[str] = mapped_column(String(2048))
+    relation: Mapped[str] = mapped_column(String(32))
+    # "sbom" (declared in the SBOM) or "inferred_top_level" (root -> package with no dependents).
+    origin: Mapped[str] = mapped_column(String(32))
+    attributes: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+
+    scan: Mapped[Scan] = relationship(back_populates="graph_edges")
