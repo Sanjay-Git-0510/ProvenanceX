@@ -7,10 +7,10 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 3, AI/model ingestion.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 4, static analysis and sandbox.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
-> known vulnerabilities and provenance. Model files are only parsed, never loaded.
-> Static code analysis, the sandbox, ML, risk scoring and blockchain anchoring do not exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
+> ML, risk scoring and blockchain anchoring do not exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -68,7 +68,9 @@ Without one they are **skipped with an explicit reason**. The real-Syft tests
 and a pinned Syft are both available, and any skip fails the build.
 
 Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run only with
-`PROVENANCEX_NETWORK_TESTS=1`. CI deselects them with `-m "not network"`.
+`PROVENANCEX_NETWORK_TESTS=1`. Tests that run the real sandbox (marker `sandbox`) run only with
+`PROVENANCEX_SANDBOX_TESTS=1` and need the sandbox image. CI deselects both with
+`-m "not network and not sandbox"`.
 
 ## API
 
@@ -151,6 +153,45 @@ Input safety:
 - URLs: https only, `github.com` or `huggingface.co` allowlist, and the host must resolve to a public IP. Hugging Face download redirects may only go to a fixed list of Hugging Face hosts.
 - ZIPs: rejected for path traversal, absolute paths, symlinks, special files, encryption, duplicate entries, decompression bombs, or size and file-count limits.
 - git: shallow clone, hooks, submodules, redirects and LFS disabled, with a timeout and size cap.
+
+## Optional Docker sandbox
+
+The sandbox is **off by default** (`SANDBOX_PROVIDER=disabled`). When it is enabled, it runs real
+untrusted code inside a disposable container, so read the limitations below first.
+
+```bash
+# Build the image (pinned base image and strace, no secrets)
+docker build -t provenancex-sandbox:0.1.0 docker/sandbox
+# or: docker compose --profile sandbox-image build sandbox-image
+
+# Run the API on the host, with Docker available
+cd backend
+SANDBOX_PROVIDER=docker .venv/bin/uvicorn app.main:app --port 8000
+
+# Live boundary tests
+PROVENANCEX_SANDBOX_TESTS=1 .venv/bin/pytest -m sandbox
+```
+
+What runs: a software scan runs a root `setup.py`. A model scan loads pickle files with stdlib
+`pickle` and imports `auto_map` modules. npm lifecycle scripts are not run.
+
+The `sandbox` stage records behavior features and `behavioral` findings. The raw trace stays
+off-chain in the scan workspace. `SANDBOX_PROVIDER=mock` returns a synthetic bundle labeled
+`source="mock"`. It is never used as a fallback. If the sandbox fails, the scan still completes,
+the stage says why, and behavior features stay `null`.
+
+Limitations:
+- **Do not run real malware through this sandbox on the host.** It is for controlled fixtures and
+  development. Analyzing real malware needs a disposable VM with no route to anything you care about.
+- **The sandbox needs the API running on the host with Docker.** Inside Compose the API has no
+  Docker access by design, so with `SANDBOX_PROVIDER=docker` the stage reports `unavailable`.
+- **Observed code can interfere with its own trace.** It can kill the tracer, rewrite `/trace` and
+  write to the bundle through `/proc/1/fd`, so quiet telemetry is not proof of safety.
+- **A kernel or container escape is outside this boundary.** Containers share the host (WSL2)
+  kernel, and the sandbox runs as the workspace owner's uid (never 0). If that user is in the `docker`
+  or `sudo` groups, an escape can lead to root in WSL and to Windows files.
+- **The host API has Docker access, which is root-equivalent, while it parses untrusted input.** See
+  [docs/architecture.md](docs/architecture.md) for this and the cleanup-failure and image-by-tag limits.
 
 ## Safety
 

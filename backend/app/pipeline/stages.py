@@ -37,7 +37,12 @@ class StageStatus(StrEnum):
 
 SUCCESS_STATUSES = frozenset({StageStatus.COMPLETED, StageStatus.PARTIAL})
 UNAVAILABLE_CODES = frozenset(
-    {ErrorCode.SBOM_TOOL_UNAVAILABLE, ErrorCode.VULN_SOURCE_UNAVAILABLE, ErrorCode.HF_UNAVAILABLE}
+    {
+        ErrorCode.SBOM_TOOL_UNAVAILABLE,
+        ErrorCode.VULN_SOURCE_UNAVAILABLE,
+        ErrorCode.HF_UNAVAILABLE,
+        ErrorCode.SANDBOX_UNAVAILABLE,
+    }
 )
 
 

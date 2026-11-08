@@ -71,7 +71,23 @@ class Settings(BaseSettings):
     # Research parameter: a share of MAX_COMPRESSION_RATIO that counts as "near the limit".
     static_archive_ratio_warn_fraction: float = Field(default=0.8, gt=0, le=1)
 
+    # --- Sandbox (Phase 4). "disabled" is the default. "mock" returns a synthetic bundle
+    # tagged source="mock". "docker" needs the API on the host, with Docker available.
+    # The network mode and other hardening flags are deliberately not settings.
+    sandbox_provider: Literal["disabled", "docker", "mock"] = "disabled"
+    sandbox_docker_path: str = "docker"
+    sandbox_image: str = "provenancex-sandbox:0.1.0"
     sandbox_timeout_seconds: int = Field(default=60, gt=0)
+    sandbox_host_grace_seconds: int = Field(default=15, gt=0)
+    sandbox_memory_mb: int = Field(default=512, gt=0)
+    sandbox_cpus: float = Field(default=1.0, gt=0)
+    sandbox_pids_limit: int = Field(default=128, gt=0)
+    sandbox_tmp_mb: int = Field(default=64, gt=0)
+    sandbox_trace_tmp_mb: int = Field(default=32, gt=0)
+    sandbox_max_stderr_kb: int = Field(default=1024, gt=0)
+    # Limits are per container, so this caps the total. Applies per API process.
+    sandbox_max_concurrent: int = Field(default=2, gt=0)
+    sandbox_queue_timeout_seconds: int = Field(default=300, gt=0)
     # Traces are untrusted: parser caps.
     sandbox_max_trace_mb: int = Field(default=16, gt=0)
     sandbox_max_trace_lines: int = Field(default=200_000, gt=0)

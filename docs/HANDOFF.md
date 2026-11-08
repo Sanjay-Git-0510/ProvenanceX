@@ -35,7 +35,7 @@ _Last updated: 2026-11-08_
   `DATABASE_URL=postgresql+psycopg://provenancex:provenancex@127.0.0.1:5433/provenancex`.
 
 - **Phase 3 (AI/model ingestion, AI-BOM, lineage graph, ProvenanceRecord, root-package cleanup):
-  complete, uncommitted on `main`. Awaiting review.**
+  complete and committed.**
   - `POST /api/v1/scans/model` takes a Hugging Face URL or a model-directory ZIP. Stages: `aibom`,
     `graph` (`graph_kind="lineage"`), `vulnerabilities`, `provenance`. Provenance also runs for
     software scans.
@@ -83,18 +83,60 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 4, Milestone C:** Docker sandbox. Wait for the go-ahead. The approved plan is in
-`~/.claude/plans/pasted-content-id-c960-read-claude-md-iridescent-lobster.md`. Phase 5 is not
-started.
+**Phase 5:** dataset generation, baseline models and evaluation. Not started. Under the agent rules
+in `CLAUDE.md`, inspect the repo and propose the Phase 5 file list for approval before implementing
+anything.
 
 ## Phase 4 progress
 
-- **Milestone B (telemetry parser): complete, uncommitted on `main`. Awaiting review.**
+- **Milestone C (Docker sandbox): complete, uncommitted on `main`. Awaiting review.**
+  - New optional stage `sandbox` (pipeline step 10). `SANDBOX_PROVIDER=disabled` is the default;
+    `mock` is labeled `source="mock"` and is never a fallback.
+  - Build the image: `docker build -t provenancex-sandbox:0.1.0 docker/sandbox`. It uses a base image
+    pinned by digest, a pinned strace, and no secrets.
+  - Targets: software runs a root `setup.py`. Models load pickles with stdlib `pickle` and import
+    `auto_map` modules. npm scripts are not run.
+  - `strace` works under the full flag set with no `SYS_PTRACE` and no seccomp change.
+  - **After the security review, these fixes were added:**
+    - Container stderr is byte-capped like stdout (`SANDBOX_MAX_STDERR_KB`).
+    - The stage is `partial`, with `incomplete_reasons`, when a target is killed (exit -9) or the
+      trace has malformed lines.
+    - `SANDBOX_MAX_CONCURRENT` limits concurrent runs per API process, with
+      `SANDBOX_QUEUE_TIMEOUT_SECONDS`; a run that cannot get a slot is `unavailable`.
+    - The supervisor reports the kernel's `oom_kill` count, used by the memory test.
+  - **Rule for Phase 6:** treat a sandbox `error` or `partial` as "not evaluated / lower confidence",
+    never as quiet.
+  - **Verified on this machine (2026-11-08), Compose Postgres on 5433, after the fixes:**
+    - `ruff check` / `ruff format --check` (backend and `docker/sandbox`): clean
+    - `pytest -m "not network and not sandbox"`: 1477 passed, 0 skipped
+    - `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox`: 35 passed, in real containers. This covers a
+      probe that walks `/proc/self/mountinfo`, blocked paths (IPv6, `AF_VSOCK`, `AF_PACKET`, raw
+      sockets, user namespaces, `io_uring`, `ptrace` on PID 1), 6 negative controls, a required
+      OOM kill at the default 512 MB and 128 pids, and `setsid` detach under the timeout.
+  - **Verified before the fixes, not re-run after them:** `pytest -m network` 7 passed; `docker compose
+    build` and the `sandbox-image` profile build OK; API on the host with `SANDBOX_PROVIDER=docker` gave
+    `completed` with 0 malformed lines; Compose API gave `unavailable`. The running Compose API image
+    predates these fixes.
+  - **Limitations (details in architecture.md):**
+    - **Do not run real malware through this sandbox on the host.**
+    - The sandbox needs the API on the host with Docker (`unavailable` in Compose).
+    - Observed code can kill the tracer, rewrite `/trace` and write to the bundle through `/proc/1/fd`.
+      A careful rewrite of the trace can still look complete.
+    - `/dev/mqueue` is writable, in-memory and private to the container.
+    - A kernel or container escape is outside this boundary. The sandbox runs as the workspace
+      owner's uid (never 0). That user is in `docker` and `sudo`, with WSL interop and `/mnt/c`
+      available, so an escape can lead to root in WSL and to Windows files.
+    - The host API has Docker access, which is root-equivalent, while it parses untrusted input.
+    - Failures of `docker kill` and `docker rm -f` are only logged. The image is trusted by tag.
+    - Live sandbox tests do not run in CI.
+  - Also changed outside the plan's file list: the `network` and `sandbox` test gates now check real
+    pytest markers, because keyword matching skipped a unit test whose parameter was `"sandbox"`.
+- **Milestone B (telemetry parser): complete and committed.**
   - `app/scanners/sandbox/telemetry.py` parses `provenancex-trace-v1` bundles into `network_count`,
     `process_count`, `file_write_count`, `syscall_count`, `external_destination_count` and
     `resource_spike`. `behavior_findings.py` builds `category="behavioral"` findings with no CVSS.
-  - Parser and findings only. It is **not wired into the pipeline yet**; that happens in Milestone C.
-    Nothing has been executed, and all test traces are hand-written and labeled synthetic.
+  - Parser and findings, wired into the pipeline by Milestone C. Its unit-test traces are
+    hand-written and labeled synthetic.
   - Bundles are untrusted. Bad envelopes raise `sandbox_trace_error`. Malformed lines are counted,
     and text inside quoted strace strings cannot create network or file events.
   - A feature with no evidence is `null`, never 0 or false.

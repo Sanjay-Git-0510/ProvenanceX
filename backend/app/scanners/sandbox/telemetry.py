@@ -401,6 +401,27 @@ def _resource_spike(
     return None, [], peaks  # no evidence to judge by: unknown, not "no spike"
 
 
+def _clean_targets(targets: Any) -> list[dict[str, Any]]:
+    """Bounded, storable target records. Paths and names come from the artifact."""
+    if not isinstance(targets, list):
+        return []
+    clean: list[dict[str, Any]] = []
+    for target in targets[:MAX_LISTED]:
+        if not isinstance(target, dict):
+            continue
+        code = target.get("exit_code")
+        clean.append(
+            {
+                "kind": storable(str(target.get("kind"))),
+                "path": storable(str(target.get("path"))),
+                "member": storable(str(target["member"])) if target.get("member") else None,
+                "exit_code": code if isinstance(code, int) and not isinstance(code, bool) else None,
+                "ran": target.get("ran") is True,
+            }
+        )
+    return clean
+
+
 def _load(raw: bytes, limits: TraceLimits) -> dict[str, Any]:
     if len(raw) > limits.max_bytes:
         raise _trace_error("Sandbox trace exceeds the size limit", {"max_bytes": limits.max_bytes})
@@ -427,7 +448,7 @@ def parse_trace_bundle(
     if not isinstance(timed_out, bool):
         raise _trace_error("Sandbox trace has an invalid timed_out value")
 
-    truncated = len(lines) > limits.max_lines
+    truncated = len(lines) > limits.max_lines or meta.get("trace_truncated") is True
     counters = _parse_lines(lines[: limits.max_lines])
     clean, bad_samples = _clean_samples(samples[: limits.max_lines])
     raw_limits = meta.get("limits") if isinstance(meta.get("limits"), dict) else {}
@@ -460,7 +481,7 @@ def parse_trace_bundle(
         limitations.append("The trace has no syscall lines, so behavior could not be evaluated.")
     if truncated:
         limitations.append(
-            f"The trace exceeded {limits.max_lines} lines; counts cover only the part parsed."
+            "The trace was cut off at its size or line limit; counts cover only the part parsed."
         )
     exit_code = meta.get("exit_code")
     duration = _number(meta.get("duration_seconds"))
@@ -476,6 +497,7 @@ def parse_trace_bundle(
             "exit_code": exit_code if isinstance(exit_code, int) else None,
             "timed_out": timed_out,
             "duration_seconds": duration,
+            "targets": _clean_targets(meta.get("targets")),
         },
         synthetic=bundle.get("synthetic") is True,
         truncated=truncated,

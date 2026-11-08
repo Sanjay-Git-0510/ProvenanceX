@@ -121,6 +121,7 @@ def test_hf_scan_records_all_stages(mock_scan):
         "vulnerabilities": "completed",
         "provenance": "completed",
         "static": "completed",
+        "sandbox": "skipped",
     }
 
 

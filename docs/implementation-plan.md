@@ -53,8 +53,8 @@ See architecture.md §4 "Phase 3 AI/ML evidence stages" for the details and know
 - AI-BOM JSON, the model lineage graph (`derived_from`, `fine_tuned_from`, `trained_on`, `bundled_with`)
 - `POST /api/v1/scans/model` and the `ProvenanceRecord` model
 
-## Phase 4: Static analysis and sandbox
-Milestone A (static analysis) ✅: the `static` stage runs for software and model scans. See architecture.md §4. Milestones B (telemetry parser) and C (Docker sandbox) remain.
+## Phase 4: Static analysis and sandbox ✅
+As built: the `static` stage runs for software and model scans, and the optional `sandbox` stage is off by default (`SANDBOX_PROVIDER=disabled`). Real sandbox runs need the API on the host. The sandbox uses the Docker CLI rather than the Docker SDK. See architecture.md §4.
 
 - AST-based import and API scanning that flags `os.system`, `subprocess`, `eval`/`exec`, network, `ctypes` and similar
 - Detection of scripts, install hooks and archive anomalies

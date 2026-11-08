@@ -29,15 +29,23 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "network: needs real internet access (set PROVENANCEX_NETWORK_TESTS=1)"
     )
+    config.addinivalue_line(
+        "markers", "sandbox: runs the real Docker sandbox (set PROVENANCEX_SANDBOX_TESTS=1)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    if os.environ.get("PROVENANCEX_NETWORK_TESTS") == "1":
-        return
-    skip = pytest.mark.skip(reason="network test: set PROVENANCEX_NETWORK_TESTS=1 to run")
-    for item in items:
-        if "network" in item.keywords:
-            item.add_marker(skip)
+    gates = (
+        ("network", "PROVENANCEX_NETWORK_TESTS"),
+        ("sandbox", "PROVENANCEX_SANDBOX_TESTS"),
+    )
+    for marker, variable in gates:
+        if os.environ.get(variable) == "1":
+            continue
+        skip = pytest.mark.skip(reason=f"{marker} test: set {variable}=1 to run")
+        for item in items:
+            if item.get_closest_marker(marker) is not None:
+                item.add_marker(skip)
 
 
 # --------------------------------------------------------------------------- health (Phase 0)

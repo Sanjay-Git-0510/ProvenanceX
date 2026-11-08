@@ -70,7 +70,7 @@ Each external integration sits behind a small interface (`typing.Protocol`) and 
 | SBOM | Syft CLI → CycloneDX JSON (`app/scanners/sbom/syft.py`) | recorded Syft SBOM (`app/scanners/sbom/mock.py`) |
 | Vulnerabilities | OSV querybatch + `/v1/vulns/{id}` (`app/scanners/vulns/osv.py`), NVD CVE API for missing CVSS only (`nvd.py`) | recorded real OSV records (`app/scanners/vulns/mock.py`) |
 | Hugging Face | Hub API + capped, verified download (`app/scanners/hf/client.py`) | synthetic benign fixture repo (`app/scanners/hf/mock.py`) |
-| Sandbox | Docker SDK | fixture telemetry |
+| Sandbox | Docker CLI as an argv list (`app/scanners/sandbox/docker_provider.py`) | synthetic bundle (`app/scanners/sandbox/mock.py`) |
 | Chain | web3.py → Hardhat | in-memory ledger |
 
 Mock output always carries `source="mock"`. The API returns that tag (`is_mock`, `contains_mock`)
@@ -204,8 +204,7 @@ Known limitations:
 
 `app/scanners/sandbox/telemetry.py` reads a recorded `provenancex-trace-v1` bundle (run metadata,
 `strace -f` text lines and cgroup resource samples) and produces the Behavior feature group.
-`behavior_findings.py` turns the result into `category="behavioral"` findings with no CVSS. The
-sandbox that produces real bundles, and the pipeline stage, come with the Docker sandbox milestone.
+`behavior_findings.py` turns the result into `category="behavioral"` findings with no CVSS.
 
 A bundle is untrusted, because the code under observation influences it. Size and line counts are
 capped, a bad envelope raises `sandbox_trace_error`, and malformed lines or samples are counted and
@@ -218,6 +217,81 @@ Known limitations:
 - With no network, hostnames never resolve, so destinations known only by name are undercounted.
 - Code under observation can detect tracing or forge its own trace lines. Quiet telemetry is not
   proof of safety.
+
+### Phase 4 Docker sandbox (`sandbox` stage, step 10, optional)
+
+`SANDBOX_PROVIDER` is `disabled` (default), `docker` or `mock`. A mock is never a fallback.
+
+**What runs.** `docker/sandbox/supervisor.py` picks a fixed set of targets, and nothing in the
+artifact can add one. Software: a regular `setup.py` at the root. Model: stdlib `pickle.load` of
+pickle files and of `*.pkl` members in ZIP weights (at most 8), and `importlib.import_module` of
+`auto_map` modules that exist in the artifact (at most 8). Each target runs under `strace -f`.
+
+**Enforcement.** `hardening.build_docker_argv` writes the command, and `hardening.assert_hardened`
+independently re-parses it against an allowlist before every launch, failing closed. No setting can
+relax these.
+
+| Boundary | Setting |
+|---|---|
+| Network off | `--network=none` (not configurable) |
+| Read-only artifact | `--mount type=bind,...,dst=/artifact,readonly`; `--read-only` root filesystem |
+| Non-root | `--user <workspace owner uid>:<gid>`, refused if 0 |
+| Capabilities | `--cap-drop=ALL`, with `--cap-add` and `--privileged` rejected |
+| No privilege gain | `--security-opt=no-new-privileges`, default seccomp profile |
+| Resources | `--pids-limit`, `--memory` with equal `--memory-swap`, `--cpus`, `--ulimit=core=0` |
+| Hard timeout | Supervisor timeout, then a host deadline, then `docker kill` |
+| No Docker socket | One mount only; anything containing `docker.sock` is rejected |
+| Writable space | Size-limited `noexec,nosuid,nodev` tmpfs at `/tmp` and `/trace`, plus `/dev/mqueue` (in-memory and private to the container). `--ipc=none` removes the writable `/dev/shm`. A live probe walks `/proc/self/mountinfo` and fails on any other writable mount. |
+| Host exposure | Stdout and stderr are each byte-capped on the host, and `SANDBOX_MAX_CONCURRENT` limits how many containers run at once (per API process) |
+
+`strace` works with these flags, without `SYS_PTRACE` or a seccomp change. Live probes
+(`tests/integration/test_sandbox_live.py`) verify each boundary inside the real container.
+
+**Trace path.** Target output is redirected to files in `/tmp`, but that does not isolate the
+bundle: targets run as the same uid, so they can write to the supervisor's stdout and stderr
+through `/proc/1/fd` and can alter `/trace`. The bundle is therefore untrusted. The supervisor writes
+it to its own stdout, which the host reads with a byte cap and a deadline. The host stores it at
+`<workspace>/sandbox/trace.json` (0600). PostgreSQL gets the features, findings and the trace's
+SHA-256. The raw trace never goes on-chain.
+
+**Cleanup.** `--rm`, a unique `px-sbx-<scan_id>` name, and `docker rm -f` in a `finally` block.
+
+**Failure.** The scan always completes. `disabled` gives `skipped`. Docker or the image missing
+gives `unavailable`. A refused command or bad mount source gives `error` with no container started.
+A missing, oversized or malformed trace gives `error` (`sandbox_trace_error`). A timeout, a target
+killed with exit -9, or malformed trace lines give `partial`, with `incomplete_reasons`. Behavior
+features stay `null` when nothing was observed.
+
+**Rule for Phase 6.** Risk scoring must treat a sandbox `error` or `partial` as "not evaluated /
+lower confidence", never as quiet. A zero count from a tampered run is not evidence of safety.
+
+Known limitations and residual risk:
+- **Do not run real malware through this sandbox on the host.** It is for controlled fixtures and
+  development. Use benign or controlled samples only. Analyzing real malware needs a disposable VM
+  with no route to anything you care about.
+- **A kernel or container escape is outside this boundary.** Containers share the host (WSL2) kernel,
+  and the sandbox runs as the workspace owner's uid (never 0). On a typical development machine that
+  user is in the `docker` and `sudo` groups, and WSL interop and `/mnt/c` are available, so an escape
+  can lead to root in WSL and to Windows files. The sandbox is a mitigation, not a proof of isolation.
+- **The host API has Docker access, which is root-equivalent, while it parses untrusted input.** A
+  parser bug in that process is not contained by the sandbox and has the same escalation path. This
+  follows from running real sandboxes with the API on the host.
+- **Cleanup can fail.** Failures of `docker kill` and `docker rm -f` are only logged. With a hung
+  Docker daemon, a container stays until its own supervisor exits.
+- **The image is trusted by tag.** `assert_hardened` checks the flags but not which image runs, so
+  anyone who can retag `provenancex-sandbox:0.1.0` or set `SANDBOX_IMAGE` controls the image.
+- `SANDBOX_MAX_CONCURRENT` applies per API process, so running several API workers multiplies it.
+- **The sandbox needs the API running on the host with Docker.** In Compose the API has no Docker
+  socket by design, so the stage reports `unavailable`.
+- **Observed code can interfere with its own trace.** It runs as the same uid as the supervisor and
+  tracer, so it can kill `strace`, wipe or rewrite `/trace`, and write to the bundle stream through
+  `/proc/1/fd`. Quiet telemetry is not proof of safety. Tampering that leaves a killed target or
+  malformed lines gives `partial`, and a broken bundle gives `error`. A careful rewrite of the trace
+  can still look complete.
+- Only Python and pickle targets run. npm lifecycle scripts are not executed. Pickles that need torch
+  or other absent packages fail on import, which appears as a non-zero target exit code.
+- If the API process crashes mid-run, the host cleanup cannot run. The supervisor's own timeout still
+  ends the container; a container whose supervisor also hung would need removing by hand.
 
 ## 5. Data model (PostgreSQL)
 

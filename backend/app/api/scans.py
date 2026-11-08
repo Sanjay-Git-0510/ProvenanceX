@@ -269,6 +269,7 @@ def get_scan(scan_id: UUID, session_factory: SessionFactoryDep) -> ScanResponse:
 _FINDING_STAGES = {
     "vulnerability": "vulnerabilities",
     "static": "static",
+    "behavioral": "sandbox",
     "provenance": "provenance",
 }
 

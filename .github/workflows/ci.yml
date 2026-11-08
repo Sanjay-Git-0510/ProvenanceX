@@ -51,12 +51,13 @@ jobs:
       - run: ruff check . && ruff format --check .
       - run: alembic upgrade head
       # Postgres and Syft are available here, so integration tests must actually run: fail on
-      # any skip. Live-internet tests (marker "network") are deselected, not skipped. Run them
-      # locally with PROVENANCEX_NETWORK_TESTS=1.
+      # any skip. Live-internet tests (marker "network") and real-sandbox tests (marker "sandbox")
+      # are deselected, not skipped. Run them locally with PROVENANCEX_NETWORK_TESTS=1 and
+      # PROVENANCEX_SANDBOX_TESTS=1.
       - name: pytest (no skips allowed)
         run: |
           set -o pipefail
-          pytest -q -rs -m "not network" | tee pytest.out
+          pytest -q -rs -m "not network and not sandbox" | tee pytest.out
           if grep -qE '[0-9]+ skipped' pytest.out; then echo "::error::tests were skipped in CI"; exit 1; fi
 
   frontend:

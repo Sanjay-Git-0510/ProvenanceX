@@ -15,6 +15,10 @@ from app.pipeline.workspace import MB
 from app.scanners.hf.base import HfProvider
 from app.scanners.hf.client import HuggingFaceProvider
 from app.scanners.hf.mock import MockHfProvider
+from app.scanners.sandbox.base import SandboxProvider
+from app.scanners.sandbox.docker_provider import DockerSandboxProvider
+from app.scanners.sandbox.hardening import SandboxLimits
+from app.scanners.sandbox.mock import MockSandboxProvider
 from app.scanners.sbom.base import SbomProvider
 from app.scanners.sbom.mock import MockSbomProvider
 from app.scanners.sbom.syft import SyftProvider
@@ -31,6 +35,7 @@ class ScanProviders:
     vulns: VulnProvider
     nvd: NvdEnricher | None
     hf: HfProvider | None = None
+    sandbox: SandboxProvider | None = None  # None: SANDBOX_PROVIDER=disabled
 
 
 def _client_factory(
@@ -46,6 +51,30 @@ def _client_factory(
         )
 
     return factory
+
+
+def _sandbox(settings: Settings) -> SandboxProvider | None:
+    if settings.sandbox_provider == "mock":
+        return MockSandboxProvider()
+    if settings.sandbox_provider == "docker":
+        return DockerSandboxProvider(
+            settings.sandbox_docker_path,
+            settings.sandbox_image,
+            SandboxLimits(
+                timeout_seconds=settings.sandbox_timeout_seconds,
+                memory_mb=settings.sandbox_memory_mb,
+                cpus=settings.sandbox_cpus,
+                pids=settings.sandbox_pids_limit,
+                tmp_mb=settings.sandbox_tmp_mb,
+                trace_tmp_mb=settings.sandbox_trace_tmp_mb,
+            ),
+            settings.sandbox_max_trace_mb * MB,
+            settings.sandbox_host_grace_seconds,
+            max_stderr_bytes=settings.sandbox_max_stderr_kb * 1024,
+            max_concurrent=settings.sandbox_max_concurrent,
+            queue_timeout_seconds=settings.sandbox_queue_timeout_seconds,
+        )
+    return None
 
 
 def build_providers(
@@ -87,4 +116,4 @@ def build_providers(
             user_agent=f"ProvenanceX/{settings.scanner_version} (supply-chain scanner)",
             transport=transport,
         )
-    return ScanProviders(sbom=sbom, vulns=vulns, nvd=nvd, hf=hf)
+    return ScanProviders(sbom=sbom, vulns=vulns, nvd=nvd, hf=hf, sandbox=_sandbox(settings))

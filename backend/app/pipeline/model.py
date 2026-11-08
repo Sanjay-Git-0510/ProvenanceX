@@ -10,6 +10,7 @@ Implements CLAUDE.md pipeline steps for AI artifacts:
   7. OSV lookup                (exactly pinned runtime requirements only)      [vuln_stage]
   8. provenance/integrity      (ProvenanceRecord + provenance Findings)        [provenance_stage]
   9. static analysis           (static features + static Findings)             [static_stage]
+ 10. sandbox (optional)        (behavior features + behavioral Findings)       [sandbox_stage]
 
 Nothing from the artifact is executed, imported or deserialized. The lifecycle (failure
 handling, workspace cleanup) is shared with the software pipeline (lifecycle.py).
@@ -34,6 +35,7 @@ from app.pipeline.lifecycle import run_scan
 from app.pipeline.lineage_stage import run_lineage_stage
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
 from app.pipeline.providers import ScanProviders, build_providers
+from app.pipeline.sandbox_stage import run_sandbox_stage
 from app.pipeline.stages import skip_stage
 from app.pipeline.static_stage import StaticExtras, run_static_stage
 from app.pipeline.vuln_stage import run_vuln_stage
@@ -214,7 +216,7 @@ def _run_evidence_stages(
     providers: ScanProviders,
     ingested: ModelIngest,
 ) -> None:
-    """Steps 5, 6, 7, 8, 9. Each stage records its own status and never raises."""
+    """Steps 5, 6, 7, 8, 9, 10. Each stage records its own status and never raises."""
     input_source = ingested.hf.source if ingested.hf else "upload"
     aibom = run_aibom_stage(session, scan_id, workspace, settings, ingested.ctx, input_source)
     lineage: dict[str, Any] | None = None
@@ -261,6 +263,7 @@ def _run_evidence_stages(
         settings,
         _static_extras(input_source, aibom, hf),
     )
+    run_sandbox_stage(session, scan_id, workspace, settings, providers.sandbox, "model")
 
 
 def _static_extras(

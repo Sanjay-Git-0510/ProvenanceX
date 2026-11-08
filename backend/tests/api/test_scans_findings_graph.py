@@ -85,6 +85,7 @@ def test_scan_records_all_stages(completed, test_settings):
         "vulnerabilities": "completed",
         "provenance": "completed",
         "static": "completed",
+        "sandbox": "skipped",
     }
     assert stages["sbom"]["source"] == "mock" and stages["sbom"]["provider"] == "mock"
     assert stages["vulnerabilities"]["source"] == "mock"

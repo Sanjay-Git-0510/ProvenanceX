@@ -9,6 +9,7 @@ Implements CLAUDE.md pipeline steps for software artifacts:
   7. OSV/NVD lookup            (vulnerability Findings)                     [vuln_stage]
   8. provenance/integrity      (ProvenanceRecord + provenance Findings)       [provenance_stage]
   9. static analysis           (static features + static Findings)            [static_stage]
+ 10. sandbox (optional)        (behavior features + behavioral Findings)      [sandbox_stage]
 Later phases add their steps after these.
 
 `run_software_ingestion` never raises (see app/pipeline/lifecycle.py). An ingestion
@@ -39,6 +40,7 @@ from app.pipeline.graph_stage import run_graph_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
 from app.pipeline.providers import ScanProviders, build_providers
+from app.pipeline.sandbox_stage import run_sandbox_stage
 from app.pipeline.sbom_stage import run_sbom_stage
 from app.pipeline.stages import skip_stage
 from app.pipeline.static_stage import StaticExtras, run_static_stage
@@ -157,7 +159,7 @@ def _run_evidence_stages(
     providers: ScanProviders,
     ingested: "SoftwareIngest",
 ) -> None:
-    """Steps 4, 6, 7, 8, 9. Each stage records its own status and never raises."""
+    """Steps 4, 6, 7, 8, 9, 10. Each stage records its own status and never raises."""
     sbom = run_sbom_stage(
         session,
         scan_id,
@@ -180,6 +182,7 @@ def _run_evidence_stages(
         settings.max_artifact_files,
     )
     run_static_stage(session, scan_id, workspace, settings, StaticExtras())
+    run_sandbox_stage(session, scan_id, workspace, settings, providers.sandbox, "software")
 
 
 @dataclass(frozen=True)

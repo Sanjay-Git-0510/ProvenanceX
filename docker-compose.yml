@@ -17,6 +17,12 @@ services:
       timeout: 3s
       retries: 10
 
+  # Build-only service: docker compose --profile sandbox-image build sandbox-image
+  sandbox-image:
+    build: ./docker/sandbox
+    image: provenancex-sandbox:0.1.0
+    profiles: ["sandbox-image"]
+
   api:
     build: ./backend
     environment:
@@ -45,6 +51,9 @@ services:
       STATIC_MAX_TOTAL_MB: ${STATIC_MAX_TOTAL_MB:-64}
       STATIC_MAX_FINDINGS: ${STATIC_MAX_FINDINGS:-500}
       STATIC_ARCHIVE_RATIO_WARN_FRACTION: ${STATIC_ARCHIVE_RATIO_WARN_FRACTION:-0.8}
+      # The API container has no Docker socket and never will: "docker" reports "unavailable"
+      # here. Real sandbox runs need the API on the host (see README).
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-disabled}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -174,7 +174,7 @@ def test_comma_in_path_keeps_argument_positions():
 def test_line_cap_reports_truncation():
     r = parse_trace_bundle(bundle(["x() = 0"] * 20), TraceLimits(10**6, 5), SPIKE)
     assert r.truncated is True and r.features["syscall_count"] == 5
-    assert any("exceeded 5 lines" in lim for lim in r.limitations)
+    assert any("cut off" in lim for lim in r.limitations)
 
 
 def test_listed_evidence_is_bounded():
