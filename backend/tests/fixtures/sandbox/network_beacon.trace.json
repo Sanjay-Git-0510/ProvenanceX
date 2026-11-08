@@ -1,0 +1,25 @@
+{
+  "format": "provenancex-trace-v1",
+  "synthetic": true,
+  "note": "Hand-written synthetic fixture. Not real sandbox output.",
+  "meta": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_seconds": 2.0,
+    "targets": [{"kind": "pickle", "path": "model.pkl", "exit_code": 1}],
+    "limits": {"memory_bytes": 536870912, "pids": 128, "cpus": 1.0}
+  },
+  "strace_lines": [
+    "200 1700000000.000001 connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr(\"93.184.216.34\")}, 16) = -1 ENETUNREACH (Network is unreachable)",
+    "200 1700000000.000002 connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr(\"93.184.216.34\")}, 16) = -1 ENETUNREACH (Network is unreachable)",
+    "[pid 201] 1700000000.000003 connect(4, {sa_family=AF_INET6, sin6_port=htons(80), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, \"2606:4700:4700::1111\", &sin6_addr), sin6_scope_id=0}, 28 <unfinished ...>",
+    "200 1700000000.000004 getpid() = 200",
+    "[pid 201] 1700000000.000005 <... connect resumed>) = -1 ENETUNREACH (Network is unreachable)",
+    "200 1700000000.000006 sendto(5, \"payload\", 7, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(\"8.8.8.8\")}, 16) = -1 ENETUNREACH (Network is unreachable)",
+    "200 1700000000.000007 bind(6, {sa_family=AF_INET, sin_port=htons(9000), sin_addr=inet_addr(\"0.0.0.0\")}, 16) = 0"
+  ],
+  "resource_samples": [
+    {"t": 0.5, "memory_bytes": 30000000, "pids": 3, "cpu_usec": 50000},
+    {"t": 1.0, "memory_bytes": 30000000, "pids": 3, "cpu_usec": 90000}
+  ]
+}

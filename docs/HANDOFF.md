@@ -83,13 +83,28 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 4, Milestone B:** telemetry parser. Wait for the go-ahead. The approved plan is in
-`~/.claude/plans/pasted-content-id-c960-read-claude-md-iridescent-lobster.md`. Milestone C is the
-Docker sandbox. Phase 5 is not started.
+**Phase 4, Milestone C:** Docker sandbox. Wait for the go-ahead. The approved plan is in
+`~/.claude/plans/pasted-content-id-c960-read-claude-md-iridescent-lobster.md`. Phase 5 is not
+started.
 
 ## Phase 4 progress
 
-- **Milestone A (static analysis): complete, uncommitted on `main`. Awaiting review.**
+- **Milestone B (telemetry parser): complete, uncommitted on `main`. Awaiting review.**
+  - `app/scanners/sandbox/telemetry.py` parses `provenancex-trace-v1` bundles into `network_count`,
+    `process_count`, `file_write_count`, `syscall_count`, `external_destination_count` and
+    `resource_spike`. `behavior_findings.py` builds `category="behavioral"` findings with no CVSS.
+  - Parser and findings only. It is **not wired into the pipeline yet**; that happens in Milestone C.
+    Nothing has been executed, and all test traces are hand-written and labeled synthetic.
+  - Bundles are untrusted. Bad envelopes raise `sandbox_trace_error`. Malformed lines are counted,
+    and text inside quoted strace strings cannot create network or file events.
+  - A feature with no evidence is `null`, never 0 or false.
+  - Limitations: with no network, hostnames never resolve, so destinations known only by name are
+    undercounted. Code under observation can detect tracing or forge its own trace lines, so quiet
+    telemetry is not proof of safety.
+  - Verified on this machine (2026-11-08), Compose Postgres on 5433: `ruff check` and
+    `ruff format --check` clean; `pytest -m "not network"` 1292 passed, 0 skipped.
+  - Not in the plan's file list: `app/core/errors.py` gained `SANDBOX_TRACE_ERROR`.
+- **Milestone A (static analysis): complete and committed.**
   - New stage `static` (pipeline step 9) runs after `provenance` for software and model scans.
     Code is only parsed with `ast` or text rules, never imported or run.
   - Features are in `stages.static.features`: `dangerous_import_count`, `suspicious_api_count`,
@@ -110,5 +125,6 @@ Docker sandbox. Phase 5 is not started.
   modules (`os`, `subprocess`, `builtins`, ...), because `getattr(obj, name)` is common in ordinary
   code. Computed names are always flagged. `docker-compose.yml` also passes the `STATIC_*` settings.
 - **Static limitations:** aliases are tracked per file without scopes, so heavily obfuscated code
-  can evade the rules. Nested tar, 7z and rar archives are flagged but not inspected. A match shows
-  what code can do and is not evidence of malice.
+  can evade the rules. `getattr` is flagged only on sensitive modules or computed names, so other
+  getattr-based obfuscation can be missed. Nested tar, 7z and rar archives are flagged but not
+  inspected. A match shows what code can do and is not evidence of malice.

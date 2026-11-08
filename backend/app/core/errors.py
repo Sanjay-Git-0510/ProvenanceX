@@ -48,6 +48,7 @@ class ErrorCode(StrEnum):
     HF_ERROR = "hf_error"
     MODEL_PARSE_ERROR = "model_parse_error"
     DOWNLOAD_INTEGRITY_ERROR = "download_integrity_error"
+    SANDBOX_TRACE_ERROR = "sandbox_trace_error"
     SCAN_NOT_FOUND = "scan_not_found"
     DATABASE_UNAVAILABLE = "database_unavailable"
     INTERNAL_ERROR = "internal_error"

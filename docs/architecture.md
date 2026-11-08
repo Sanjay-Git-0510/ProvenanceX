@@ -192,8 +192,32 @@ per rule and file, capped at `STATIC_MAX_FINDINGS` (features still count every o
 budget is hit the stage is `partial` and lists the skipped files. Artifact text is sanitized before
 storage, because PostgreSQL rejects NUL bytes and lone surrogates.
 
-Known limitations: aliases are tracked per file without scopes, so heavily obfuscated code can evade
-these rules. Nested tar, 7z and rar archives are flagged but not inspected.
+Known limitations:
+- Aliases are tracked per file without scopes, so heavily obfuscated code can evade these rules.
+- `getattr` is flagged only on sensitive modules (`os`, `subprocess`, `builtins`, `sys`, `socket`,
+  `ctypes`, `importlib`) or when the attribute name is computed (concatenation, f-string, call),
+  because `getattr(obj, name)` is common in ordinary code. Other getattr-based obfuscation, such as
+  a plain variable name on an object that holds a dangerous callable, can be missed.
+- Nested tar, 7z and rar archives are flagged but not inspected.
+
+### Phase 4 telemetry parser
+
+`app/scanners/sandbox/telemetry.py` reads a recorded `provenancex-trace-v1` bundle (run metadata,
+`strace -f` text lines and cgroup resource samples) and produces the Behavior feature group.
+`behavior_findings.py` turns the result into `category="behavioral"` findings with no CVSS. The
+sandbox that produces real bundles, and the pipeline stage, come with the Docker sandbox milestone.
+
+A bundle is untrusted, because the code under observation influences it. Size and line counts are
+capped, a bad envelope raises `sandbox_trace_error`, and malformed lines or samples are counted and
+skipped. Arguments are split with a quote-aware tokenizer and addresses are read only from the
+position that holds them, so text inside a quoted string cannot create events. Evidence is bounded
+and sanitized for PostgreSQL, while the features count every occurrence. `external_destination_count`
+counts distinct globally routable IP and port pairs. A feature with no evidence is `null`.
+
+Known limitations:
+- With no network, hostnames never resolve, so destinations known only by name are undercounted.
+- Code under observation can detect tracing or forge its own trace lines. Quiet telemetry is not
+  proof of safety.
 
 ## 5. Data model (PostgreSQL)
 

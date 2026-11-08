@@ -1,0 +1,21 @@
+{
+  "format": "provenancex-trace-v1",
+  "synthetic": true,
+  "note": "Hand-written synthetic fixture. Not real sandbox output.",
+  "meta": {
+    "exit_code": null,
+    "timed_out": true,
+    "duration_seconds": 60.0,
+    "targets": [{"kind": "setup_py", "path": "setup.py", "exit_code": null}],
+    "limits": {"memory_bytes": 1000, "pids": 100, "cpus": 1.0}
+  },
+  "strace_lines": [
+    "400 1700000000.000001 getpid() = 400"
+  ],
+  "resource_samples": [
+    {"t": 0, "memory_bytes": 100, "pids": 10, "cpu_usec": 0},
+    {"t": 1, "memory_bytes": 950, "pids": 95, "cpu_usec": 1000000},
+    {"t": 2, "memory_bytes": 960, "pids": 96, "cpu_usec": 2000000},
+    {"t": 3, "memory_bytes": 970, "pids": 97, "cpu_usec": 3000000}
+  ]
+}

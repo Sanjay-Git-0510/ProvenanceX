@@ -1,0 +1,26 @@
+{
+  "format": "provenancex-trace-v1",
+  "synthetic": true,
+  "note": "Hand-written synthetic fixture. Not real sandbox output.",
+  "meta": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_seconds": 1.5,
+    "targets": [{"kind": "setup_py", "path": "setup.py", "exit_code": 0}],
+    "limits": {"memory_bytes": 536870912, "pids": 128, "cpus": 1.0}
+  },
+  "strace_lines": [
+    "100 1700000000.000001 execve(\"/usr/local/bin/python\", [\"python\", \"setup.py\"], 0x7ffd /* 3 vars */) = 0",
+    "100 1700000000.000100 openat(AT_FDCWD, \"/artifact/setup.py\", O_RDONLY|O_CLOEXEC) = 3",
+    "100 1700000000.000200 openat(AT_FDCWD, \"/tmp/out.txt\", O_WRONLY|O_CREAT|O_TRUNC, 0644) = 4",
+    "100 1700000000.000300 openat(AT_FDCWD, \"/dev/null\", O_WRONLY) = 5",
+    "100 1700000000.000400 connect(6, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr(\"127.0.0.1\")}, 16) = -1 ECONNREFUSED (Connection refused)",
+    "100 1700000000.000500 connect(7, {sa_family=AF_UNIX, sun_path=\"/run/nscd/socket\"}, 110) = -1 ENOENT (No such file or directory)",
+    "100 1700000000.000600 exit_group(0) = ?",
+    "100 1700000000.000700 +++ exited with 0 +++"
+  ],
+  "resource_samples": [
+    {"t": 0.5, "memory_bytes": 20000000, "pids": 2, "cpu_usec": 100000},
+    {"t": 1.0, "memory_bytes": 24000000, "pids": 2, "cpu_usec": 180000}
+  ]
+}

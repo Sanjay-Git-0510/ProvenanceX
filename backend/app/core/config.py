@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     static_archive_ratio_warn_fraction: float = Field(default=0.8, gt=0, le=1)
 
     sandbox_timeout_seconds: int = Field(default=60, gt=0)
+    # Traces are untrusted: parser caps.
+    sandbox_max_trace_mb: int = Field(default=16, gt=0)
+    sandbox_max_trace_lines: int = Field(default=200_000, gt=0)
+    # Research parameters: resource_spike thresholds, as shares of the sandbox limits.
+    sandbox_spike_memory_fraction: float = Field(default=0.9, gt=0, le=1)
+    sandbox_spike_pids_fraction: float = Field(default=0.9, gt=0, le=1)
+    sandbox_spike_cpu_fraction: float = Field(default=0.9, gt=0, le=1)
+    sandbox_spike_cpu_min_intervals: int = Field(default=3, gt=0)
     model_path: Path = Path("./ml/models")
 
     blockchain_rpc_url: str = "http://localhost:8545"
