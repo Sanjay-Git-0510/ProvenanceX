@@ -99,7 +99,10 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 (blockchain) is next.** Not started; waiting for the go-ahead.
+**Phase 7 Milestone A (contract and Hardhat) is done and waiting to be committed.** Milestones B
+(web3.py adapter, anchoring) and C (verification API, pipeline wiring) are not started. See "Phase 7
+progress". The approved Compose `workspace` named volume and its hardening-test change belong to
+Milestone C.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -141,6 +144,55 @@ Standing notes:
   the artifact. See "Decisions can flip between scans" in `docs/architecture.md`.
 - Factors with `evaluated=false` describe missing evidence and must look different from measured
   factors. Show `training_data.notice` wherever ML output appears, and label `contains_mock_evidence`.
+
+## Phase 7 progress
+
+- **Milestone A (contract and Hardhat): complete, not yet committed.** Nothing in `backend/app` uses
+  the chain yet.
+  - New: `contracts/` Hardhat project (`contracts/ProvenanceEvidence.sol`, `test/`, `scripts/deploy.js`,
+    `hardhat.config.js`, `package.json`, `package-lock.json`, `Dockerfile`, `.dockerignore`),
+    `backend/tests/unit/test_compose_chain.py`, Compose services `hardhat` and `hardhat-deploy`
+    (profile `chain-deploy`), a `contracts` CI job, `BLOCKCHAIN_HOST_PORT`.
+  - **Encoding (see `contracts/README.md`):** `riskScore` is a `uint32` score x 1,000,000, with
+    `NO_SCORE = type(uint32).max` for null. Zero `bytes32` means an absent BOM or provenance hash.
+    `artifactHash` must be non-zero. Decisions are `ALLOW=1`, `REVIEW=2`, `BLOCK=3`.
+  - **Append-only, deployer-only:** `anchor` is the only state-changing function, and only the
+    deployer can call it. Each anchor emits one `EvidenceAnchored` event.
+  - **Decisions (user, 2026-11-09):** Compose workspace as a named volume, missing files give UNKNOWN;
+    zero marker plus `missing_evidence` for an absent BOM or provenance hash; Hardhat 2.29.1.
+  - **Different from the approved plan:** `@nomicfoundation/hardhat-toolbox` is not installed. It needs
+    18 peer packages, most unused here. Only `hardhat-ethers` and `hardhat-chai-matchers` are used.
+  - **Hardhat and the image:** Node 22 by digest (the host's Node 26 was not used). `npm ci
+    --ignore-scripts`. The contract is compiled at build time, so both services run read-only and the
+    deploy uses `--no-compile`.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:** see README "Local chain" for
+    how to repeat these.
+    - The exact CI ruff commands: clean
+    - `npx hardhat test` in the Node 22 image: 32 passing, both with a compile and on a read-only
+      filesystem with `--no-compile`
+    - `pytest -m "not network and not sandbox"`, including Postgres, on Python 3.14: 2053
+      passed, 0 failed, 0 skipped, 42 deselected (19 new tests in `test_compose_chain.py`)
+    - `alembic current` = `0005 (head)` (no migration in this milestone)
+    - Compose: `hardhat` healthy, user `node`, read-only root, all capabilities dropped, port bound to
+      127.0.0.1. A deploy with no key failed with a clear message. A deploy with the node's test key
+      (held only in a shell variable) returned a contract address on chain 31337. A non-local
+      `BLOCKCHAIN_RPC_URL` was refused.
+  - **Follow-up checks after Milestone A (2026-11-09), no code changed, no failures:**
+    - `PROVENANCEX_NETWORK_TESTS=1 pytest -m network`, Python 3.14: 7 passed, 0 failed, 0 skipped
+    - `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox`, Python 3.14, real containers: 35 passed,
+      0 failed, 0 skipped
+    - Frontend on host Node 26: `npm run lint` clean; `npm test -- --run` 16 passed; `npm run build`
+      succeeded
+    - Python 3.12.16, disposable container from `provenancex-api:latest` (repo mounted read-only, only
+      pytest added), Compose Postgres on 5433: `pytest -m "not network and not sandbox"` 2053 passed,
+      0 failed, 0 skipped, 42 deselected; `pytest -m network` 7 passed, 0 failed, 0 skipped
+  - **Still not run:** `pytest -m sandbox` on Python 3.12 (the API image has no Docker, by design),
+    frontend checks on Node 22 (the CI version), the CI workflow on GitHub (including the new job).
+  - **Known issue:** `npm audit` reports 23 advisories (11 low, 4 moderate, 8 high) in the dependency
+    tree of the Hardhat dev tooling. The tooling runs only locally and the chain is bound to loopback.
+    Not triaged or fixed; `npm audit fix` was not run.
+  - **Limitation:** the chain runs in memory, so a restart erases all anchors and the contract.
+    Milestone C must report this as UNKNOWN (`chain_state_lost`).
 
 ## Phase 6 progress
 

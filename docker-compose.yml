@@ -1,4 +1,4 @@
-# Local development stack. Phase 4 adds the sandbox image; Phase 7 adds the hardhat service.
+# Local development stack: Postgres, the sandbox image, the local Hardhat chain, API and frontend.
 # Ports are bound to 127.0.0.1 so nothing is exposed beyond the dev machine.
 services:
   postgres:
@@ -22,6 +22,38 @@ services:
     build: ./docker/sandbox
     image: provenancex-sandbox:0.1.0
     profiles: ["sandbox-image"]
+
+  # Local chain only, bound to loopback. It runs in memory, so a restart erases every anchor.
+  hardhat:
+    build: ./contracts
+    image: provenancex-hardhat:0.1.0
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:${BLOCKCHAIN_HOST_PORT:-8545}:8545"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>r.json()).then(j=>process.exit(j.result==='0x7a69'?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot deploy: docker compose --profile chain-deploy run --rm hardhat-deploy
+  # The key comes only from the git-ignored .env.
+  hardhat-deploy:
+    image: provenancex-hardhat:0.1.0
+    profiles: ["chain-deploy"]
+    # --no-compile: the image is compiled at build time and this container is read-only.
+    command: ["npx", "hardhat", "run", "--no-compile", "scripts/deploy.js", "--network", "provenancex"]
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      BLOCKCHAIN_RPC_URL: http://hardhat:8545
+      BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:-}
+    depends_on:
+      hardhat:
+        condition: service_healthy
 
   api:
     build: ./backend

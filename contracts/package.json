@@ -1,0 +1,19 @@
+{
+  "name": "provenancex-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProvenanceX evidence contract for a local Hardhat chain",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node --hostname 0.0.0.0",
+    "deploy:local": "hardhat run scripts/deploy.js --network provenancex"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "2.1.2",
+    "@nomicfoundation/hardhat-ethers": "3.1.3",
+    "chai": "4.5.0",
+    "ethers": "6.17.0",
+    "hardhat": "2.29.1"
+  }
+}

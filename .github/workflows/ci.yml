@@ -60,6 +60,23 @@ jobs:
           pytest -q -rs -m "not network and not sandbox" | tee pytest.out
           if grep -qE '[0-9]+ skipped' pytest.out; then echo "::error::tests were skipped in CI"; exit 1; fi
 
+  contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    env:
+      HARDHAT_DISABLE_TELEMETRY_PROMPT: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx hardhat test
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

@@ -7,10 +7,11 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 4, static analysis and sandbox.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 7, blockchain evidence (in progress).** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
-> ML, risk scoring and blockchain anchoring do not exist yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. The evidence contract and local chain exist, but the API does not anchor
+> or verify scans yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -193,6 +194,24 @@ Limitations:
   or `sudo` groups, an escape can lead to root in WSL and to Windows files.
 - **The host API has Docker access, which is root-equivalent, while it parses untrusted input.** See
   [docs/architecture.md](docs/architecture.md) for this and the cleanup-failure and image-by-tag limits.
+
+## Local chain
+
+`docker compose up` also starts a local Hardhat chain, bound to `127.0.0.1:8545`. It is for local
+development only and runs in memory, so restarting it erases every anchor. The API does not use it
+yet.
+
+```bash
+# Contract tests, in the pinned Node 22 image
+docker compose build hardhat
+docker compose run --rm --no-deps hardhat npx hardhat test --no-compile
+
+# Deploy (needs a local Hardhat test key in your git-ignored .env)
+docker compose --profile chain-deploy run --rm hardhat-deploy
+```
+
+The full steps and the on-chain encoding are in [contracts/README.md](contracts/README.md). Use only
+Hardhat's public test keys, and never a real key.
 
 ## Safety
 
