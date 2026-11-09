@@ -1,7 +1,8 @@
 """Compute, store and return the risk result for a scan.
 
-The result is computed once, the first time a completed scan's risk is requested, and stored.
-Later reads return the stored result, so a decision does not change when models are retrained.
+The risk pipeline stage normally stores the result. A completed scan with no stored result (an
+older scan, or one whose risk stage failed) gets one the first time its risk is requested. Later
+reads return the stored result, so a decision does not change when models are retrained.
 """
 
 import logging
@@ -79,8 +80,20 @@ def _provenance_row(session: Session, scan_id: Any) -> ProvenanceRecord | None:
     ).first()
 
 
-def _snapshot(session: Session, scan: Scan, record: ProvenanceRecord | None) -> ScanSnapshot:
-    """What the database holds about a scan. Config digests are not persisted, so they are None."""
+def _stored_config_digest(scan: Scan) -> str | None:
+    stage = (scan.stages or {}).get("risk")
+    snapshot = stage.get("comparison_snapshot") if isinstance(stage, Mapping) else None
+    digest = snapshot.get("config_sha256") if isinstance(snapshot, Mapping) else None
+    return digest if isinstance(digest, str) else None
+
+
+def _snapshot(
+    session: Session,
+    scan: Scan,
+    record: ProvenanceRecord | None,
+    config_sha256: str | None = None,
+) -> ScanSnapshot:
+    """A scan's comparison evidence. config_sha256 falls back to the digest its risk stage saved."""
     usable = stage_null_reason((scan.stages or {}).get("graph")) is None
     nodes = session.scalars(select(GraphNode).where(GraphNode.scan_id == scan.id)).all()
     labels = {node.node_key: node.label for node in nodes}
@@ -91,7 +104,7 @@ def _snapshot(session: Session, scan: Scan, record: ProvenanceRecord | None) -> 
         if node.attributes and "betweenness_centrality" in node.attributes
     ]
     return ScanSnapshot(
-        config_sha256=None,
+        config_sha256=config_sha256 or _stored_config_digest(scan),
         edges=frozenset(
             (labels.get(e.source_key, e.source_key), labels.get(e.target_key, e.target_key))
             for e in edges
@@ -101,8 +114,22 @@ def _snapshot(session: Session, scan: Scan, record: ProvenanceRecord | None) -> 
     )
 
 
+def snapshot_document(session: Session, scan: Scan, config_sha256: str | None) -> dict[str, Any]:
+    """The JSON saved for later comparisons. Edges stay in the graph_edges table."""
+    snapshot = _snapshot(session, scan, _provenance_row(session, scan.id), config_sha256)
+    return {
+        "config_sha256": snapshot.config_sha256,
+        "max_centrality": snapshot.max_centrality,
+        "attestation_present": snapshot.attestation_present,
+        "edge_count": len(snapshot.edges),
+    }
+
+
 def _comparison(
-    session: Session, scan: Scan, record: ProvenanceRecord | None
+    session: Session,
+    scan: Scan,
+    record: ProvenanceRecord | None,
+    config_sha256: str | None,
 ) -> dict[str, Any] | None:
     """Compare with the prior scan the provenance stage used. None when there is no prior scan."""
     if record is None or record.previous_scan_id is None:
@@ -112,7 +139,7 @@ def _comparison(
         return None
     result = compare_snapshots(
         _snapshot(session, prior, _provenance_row(session, prior.id)),
-        _snapshot(session, scan, record),
+        _snapshot(session, scan, record, config_sha256),
     )
     if stage_null_reason((prior.stages or {}).get("graph")) is not None:
         result["new_edge_count"] = None  # no usable prior graph, so every edge would look new
@@ -217,7 +244,10 @@ def _hard_rule_evidence(
     return evidence
 
 
-def _compute(session: Session, scan: Scan, settings: Settings) -> RiskDecision:
+def compute_decision(
+    session: Session, scan: Scan, settings: Settings, config_sha256: str | None = None
+) -> RiskDecision:
+    """Build the decision row from a scan's stored evidence. The caller persists it."""
     record = _provenance_row(session, scan.id)
     findings = _finding_refs(session, scan.id)
     artifact_type = str(scan.artifact.artifact_type)
@@ -225,7 +255,7 @@ def _compute(session: Session, scan: Scan, settings: Settings) -> RiskDecision:
         artifact_type,
         scan.stages or {},
         _provenance_document(record),
-        _comparison(session, scan, record),
+        _comparison(session, scan, record, config_sha256),
         _version_consistency(scan, settings),
     )
     outputs, ml_reason, shap_result, training_data = _run_models(scan, extraction, settings)
@@ -264,6 +294,8 @@ def _compute(session: Session, scan: Scan, settings: Settings) -> RiskDecision:
             "contains_mock_evidence": _contains_mock(scan, findings),
             "cvss_reason": _cvss_reason(extraction),
             "hard_rule_evidence": _hard_rule_evidence(assessment, findings),
+            "features": extraction.features,
+            "null_reasons": {k: str(v) for k, v in extraction.null_reasons.items()},
         },
     )
 
@@ -305,7 +337,7 @@ def risk_for_scan(session: Session, scan: Scan, settings: Settings) -> RiskRespo
     decision = _stored(session, scan.id)
     if decision is None:
         try:
-            computed = _compute(session, scan, settings)
+            computed = compute_decision(session, scan, settings)
         except SQLAlchemyError:
             raise
         except Exception:  # reported as an explicit state; nothing is stored, so a retry can work

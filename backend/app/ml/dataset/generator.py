@@ -259,7 +259,7 @@ def _suspicious_trace_lines(rng: np.random.Generator) -> list[str]:
     return lines
 
 
-def _trace_features(state: ArtifactState, rng: np.random.Generator, settings: Settings) -> dict:
+def _trace_bundle(state: ArtifactState, rng: np.random.Generator) -> bytes:
     lines = (
         _suspicious_trace_lines(rng)
         if state.trace_kind == "suspicious"
@@ -278,8 +278,12 @@ def _trace_features(state: ArtifactState, rng: np.random.Generator, settings: Se
         "strace_lines": lines,
         "resource_samples": [{"t": 0.5, "memory_bytes": 20000000, "pids": 2, "cpu_usec": 100000}],
     }
+    return json.dumps(bundle).encode()
+
+
+def _trace_features(state: ArtifactState, rng: np.random.Generator, settings: Settings) -> dict:
     result = parse_trace_bundle(
-        json.dumps(bundle).encode(),
+        _trace_bundle(state, rng),
         TraceLimits(settings.sandbox_max_trace_mb * MB, settings.sandbox_max_trace_lines),
         SpikeThresholds(
             settings.sandbox_spike_memory_fraction,

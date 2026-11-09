@@ -156,13 +156,27 @@ def test_models_are_cached_until_the_manifest_changes(saved_dir, tmp_path, monke
         load_models(tmp_path)
 
 
+def test_random_forest_scoring_is_repeatable(saved_dir, records):
+    models = load_models(saved_dir)
+    assert models.bundle.random_forest.n_jobs == 1
+    row = encode_features(models, _validation_record(records).features)
+    first = models.bundle.random_forest.predict_proba(row).tobytes()
+    assert models.bundle.random_forest.predict_proba(row).tobytes() == first
+
+
+def test_model_version_covers_every_file():
+    files = {"a": {"sha256": "1"}, "b": {"sha256": "2"}}
+    changed = {"a": {"sha256": "1"}, "b": {"sha256": "3"}}
+    assert model_runtime.model_version(files) != model_runtime.model_version(changed)
+
+
 def test_scores_are_separate_python_floats(saved_dir, records):
     models = load_models(saved_dir)
     outputs = score_row(models, encode_features(models, _validation_record(records).features))
     assert type(outputs.rf_risk_probability) is float
     assert type(outputs.anomaly_score) is float
     assert np.isfinite(outputs.anomaly_score)
-    assert outputs.model_version.startswith("rf-sha256:")
+    assert outputs.model_version.startswith("models-sha256:")
 
 
 def test_risk_package_loads_models_only_through_load_bundle():

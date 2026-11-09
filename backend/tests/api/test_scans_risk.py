@@ -207,7 +207,7 @@ def test_result_is_stored_once(client, session_factory, monkeypatch):
     def fail(*_args):
         raise AssertionError("must not recompute")
 
-    monkeypatch.setattr(service, "_compute", fail)
+    monkeypatch.setattr(service, "compute_decision", fail)
     second = _risk(client, scan_id)
     first.pop("computed_at"), second.pop("computed_at")  # SQLite drops the timezone on re-read
     assert second == first
@@ -215,18 +215,55 @@ def test_result_is_stored_once(client, session_factory, monkeypatch):
 
 
 def test_computation_error_is_explicit_and_not_stored(client, session_factory, monkeypatch):
-    scan_id = _upload(client)
-
     def fail(*_args):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(service, "_compute", fail)
+    monkeypatch.setattr(service, "compute_decision", fail)
+    monkeypatch.setattr("app.pipeline.risk_stage.compute_decision", fail)
+    scan_id = _upload(client)
+    scan = client.get(f"/api/v1/scans/{scan_id}").json()
+    assert scan["status"] == "completed"  # a failed risk stage never fails the scan
+    assert scan["stages"]["risk"]["status"] == "error"
+    assert "boom" not in str(scan["stages"]["risk"])
     body = _risk(client, scan_id)
     assert body["status"] == "not_computed"
     assert body["reason"]["code"] == "risk_computation_error"
     assert "boom" not in str(body)
     assert body["risk_score"] is None
     assert _stored_count(session_factory) == 0
+
+
+def test_risk_stage_stores_the_decision_during_the_scan(client, session_factory):
+    scan_id = _upload(client)
+    with session_factory() as session:
+        decision = session.query(RiskDecision).one()
+        assert str(decision.scan_id) == scan_id
+        assert decision.model_version is None  # no model was used
+    stage = client.get(f"/api/v1/scans/{scan_id}").json()["stages"]["risk"]
+    assert stage["status"] == "completed"
+    assert stage["ml_status"] == "unavailable"
+    assert stage["decision"] == decision.decision
+    snapshot = stage["comparison_snapshot"]
+    assert set(snapshot) == {
+        "config_sha256",
+        "max_centrality",
+        "attestation_present",
+        "edge_count",
+    }
+    assert snapshot["edge_count"] > 0
+
+
+def test_model_version_is_stored_with_the_decision(
+    settings, session_factory, public_dns, models_dir
+):
+    client = _client(settings.model_copy(update={"model_path": models_dir}), session_factory)
+    scan_id = _upload(client)
+    stage = client.get(f"/api/v1/scans/{scan_id}").json()["stages"]["risk"]
+    with session_factory() as session:
+        stored = session.query(RiskDecision).one().model_version
+    assert stored.startswith("models-sha256:")
+    assert stage["model_version"] == stored
+    assert _risk(client, scan_id)["ml"]["model_version"] == stored
 
 
 def test_with_models_values_are_separate_and_labeled_synthetic(
@@ -239,7 +276,7 @@ def test_with_models_values_are_separate_and_labeled_synthetic(
     assert scores["anomaly_score"]["value"] is not None
     assert scores["ml_probability"]["value"] != body["risk_score"]
     assert body["ml"]["status"] == "available"
-    assert body["ml"]["model_version"].startswith("rf-sha256:")
+    assert body["ml"]["model_version"].startswith("models-sha256:")
     assert body["training_data"] == {
         "label": "synthetic",
         "models_used": True,

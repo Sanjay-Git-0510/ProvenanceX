@@ -64,9 +64,9 @@ _Last updated: 2026-11-09_
   Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
   42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
   under "Phase 5 progress".
-- **Phase 6 (fusion, policy, SHAP, explanation API): in progress.** Milestone A is committed.
-  Milestone B is complete and awaiting commit. Milestone C is not started. Details are under
-  "Phase 6 progress".
+- **Phase 6 (fusion, policy, SHAP, explanation API): Milestones A, B and C are done.** A and B are
+  committed; C is awaiting commit. `GET /scans/{id}/evidence`, which the implementation plan and
+  CLAUDE.md list, is **not built**. Details are under "Phase 6 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -94,16 +94,13 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 6 Milestone C:** not started. Wait for the go-ahead.
+Wait for the go-ahead. Decide first whether `GET /scans/{id}/evidence` is built before Phase 7.
 
-Notes for the rest of Phase 6:
+Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
 - Null evidence must lower confidence and never read as clean. See the false-positive finding below.
-- Loading artifacts built on Python 3.14 from the 3.12 API image is untested. Milestone C needs
-  Docker Desktop running, because this machine has no Python 3.12. If the check fails, stop and ask.
-  The shap compatibility check has also only run on Python 3.14.
-- The API image still has no ML packages and `ml/models` is not mounted, so the Compose API reports
-  "ML model unavailable". On the host, set `MODEL_PATH=../ml/models` when running from `backend/`.
+- On the host, set `MODEL_PATH=../ml/models` when running from `backend/`. Compose mounts
+  `ml/models` read-only at `/app/ml/models`.
 
 ## Notes for Phases 7 and 8: `risk_score` can be null
 
@@ -135,7 +132,70 @@ Notes for the rest of Phase 6:
 
 ## Phase 6 progress
 
-- **Milestone B (SHAP, RiskDecision, `/risk`): complete, awaiting commit.**
+- **Milestone C (risk stage, parity, ML in the API image): complete, awaiting commit.**
+  - New: `app/pipeline/risk_stage.py`, `tests/api/test_feature_parity.py`,
+    `tests/unit/test_compose_settings.py`. The `risk` stage runs after the sandbox in both pipelines
+    and never fails the scan. `GET /risk` still computes a result for older scans, or when the
+    stage failed.
+  - **Comparison snapshot:** saved in `stages.risk.comparison_snapshot` (`config_sha256`,
+    `max_centrality`, `attestation_present`, `edge_count`). Edges are not copied, because they are
+    already in `graph_edges`. This replaces the Milestone B limitation: `config_changed` now has a
+    value on a later scan, once the prior scan has a saved digest. A prior scan from before this
+    change has none, so its next scan still reports `not_determinable`.
+  - **Model version:** stored on each decision as `models-sha256:<16 hex>`, over every model,
+    threshold and preprocessing file (replaces Milestone B's Random Forest-only `rf-sha256:`). It
+    is null when no model was used.
+  - **Python 3.12 check** (throwaway `python:3.12-slim`, real models, 301-row fixed matrix, same
+    library versions as 3.14, no retraining): XGBoost and Isolation Forest identical. Random Forest
+    differed by at most 1.1e-16 with the saved `n_jobs=-1`, but 8 repeat runs in one process also
+    gave 8 different results on either version, so that is parallel averaging. With `n_jobs=1` the
+    3.14 and 3.12 outputs are bit-for-bit identical, and no flag changed in any run. Decision (user,
+    2026-11-09): treat this as passing, and set `n_jobs=1` on the loaded forest at runtime, in
+    memory only. The model files are unchanged.
+  - **Feature parity test:** 48 artifact states across software (GitHub, upload), model
+    (Hugging Face, upload) and LoRA run through the real pipelines. Only external tools are replaced,
+    using the generator's own SBOM, advisories and trace. Features, null reasons and the
+    `transform_features` matrix all match the generator. A mutation that ignored the saved config
+    digest made it fail.
+  - **Image and env:** `requirements-ml.txt` is installed in the API image; `ml/models` is mounted
+    read-only; 33 missing settings were added to the Compose `api` environment. A new test keeps
+    Compose, `.env.example` and `Settings` in step; the blockchain settings are left for Phase 7.
+  - **Existing tests changed:** two stage-set tests now include `risk`, and
+    `test_compose_api_has_no_docker_socket` now allows exactly the one read-only models mount
+    instead of no volumes.
+  - **Compose API, Python 3.12, models loaded, sandbox disabled, real SBOM/OSV/Hugging Face:**
+
+    | Scan | /risk | risk_score | Decision | Confidence | ML probability | CVSS max |
+    |---|---|---|---|---|---|---|
+    | github.com/pallets/flask | computed | 0.700 | REVIEW | 0.79 HIGH | 0.987 | 8.8 |
+    | Python fixture ZIP | computed | 0.483 | REVIEW | 0.63 MEDIUM | 0.972 | 5.3 |
+    | hf tiny-random-gpt2, first scan | computed | 0.306 | REVIEW (insufficient evidence) | 0.594 MEDIUM | 0.520 | null |
+    | hf tiny-random-gpt2, rescan | computed | 0.301 | ALLOW | 0.606 MEDIUM | 0.465 | null |
+
+    All four: `ml_status=available`, SHAP available, stored `model_version`, labeled synthetic. These
+    are wiring checks on a handful of artifacts, not detection results.
+  - **Observed, not acted on** (no parameter was changed):
+    - The re-check of Milestone A's confidence finding is above. The same model went from REVIEW to
+      ALLOW only because `config_changed` became known, moving confidence from 0.594 past the 0.60
+      minimum.
+    - That ALLOW has its vulnerability and behavioral layers unevaluated: the repo has no pinned
+      dependencies and the sandbox was off. The vulnerability layer is not required for AI artifacts
+      under the current hand-set policy.
+    - The Random Forest gave 0.97 to 0.99 on two benign projects with real advisories. That output
+      means "not benign" under the synthetic labels, which include vulnerable, and is not malice.
+  - **Dataset:** `generate_records(200, 42)` after the generator refactor reproduced the recorded
+    `dataset_sha256` (`d01885bf...`).
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean
+    - `pytest -m "not network and not sandbox"`, including Postgres, on Python 3.14: 1961 passed,
+      0 failed, 0 skipped, 42 deselected
+    - `alembic current` = `0005 (head)` on host and in the API container; `alembic check`: no drift
+    - `docker compose build api` + `up --wait`: healthy. All 60 Compose variables match `Settings`
+      inside the container.
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected), frontend tests, the
+    pytest suite on Python 3.12, a `frontend` image build, the CI workflow on GitHub, and a scan with
+    the sandbox enabled.
+- **Milestone B (SHAP, RiskDecision, `/risk`): complete and committed.**
   - New: `app/risk/model_runtime.py`, `explain.py`, `service.py`, `app/schemas/risk.py`, migration
     `0005` (`risk_decisions`), `GET /api/v1/scans/{id}/risk`, the `shap==0.54.1` pin,
     `tests/unit/test_risk_explain.py`, `tests/api/test_scans_risk.py`, and new Postgres tests in

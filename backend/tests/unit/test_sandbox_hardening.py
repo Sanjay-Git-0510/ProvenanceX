@@ -2,6 +2,7 @@
 
 import re
 import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -169,7 +170,91 @@ def test_root_owned_workspace_is_refused(tmp_path):
 def test_compose_api_has_no_docker_socket():
     compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
     assert "docker.sock" not in (REPO / "docker-compose.yml").read_text()
-    assert not compose["services"]["api"].get("volumes")
+    # The only mount allowed is the trusted model directory, read-only.
+    assert compose["services"]["api"]["volumes"] == ["./ml/models:/app/ml/models:ro"]
+    api = compose["services"]["api"]
+    assert not {"tmpfs", "volumes_from", "devices", "privileged", "cap_add"} & set(api)
+    assert not [key for key in ("network_mode", "pid", "ipc") if api.get(key) == "host"]
+
+
+_SOCKET = "/var/run/docker.sock"
+_MODELS = "./ml/models:/app/ml/models:ro"
+_API_MOUNT_VIOLATIONS = {
+    "socket_added": [_MODELS, f"{_SOCKET}:{_SOCKET}"],
+    "socket_added_read_only": [_MODELS, f"{_SOCKET}:{_SOCKET}:ro"],
+    "socket_replaces_models": [f"{_SOCKET}:/app/ml/models:ro"],
+    "socket_long_form": [_MODELS, {"type": "bind", "source": _SOCKET, "target": _SOCKET}],
+    "models_read_write": ["./ml/models:/app/ml/models:rw"],
+    "models_default_mode_is_writable": ["./ml/models:/app/ml/models"],
+    "models_long_form_writable": [
+        {"type": "bind", "source": "./ml/models", "target": "/app/ml/models"}
+    ],
+    "extra_writable_bind": [_MODELS, "./backend:/app/extra"],
+    "extra_writable_named_volume": [_MODELS, "pgdata:/app/extra"],
+    "extra_read_only_bind": [_MODELS, "./backend:/app/extra:ro"],
+    "extra_mount_only": ["./backend:/app/extra:ro"],
+    "models_mounted_twice": [_MODELS, _MODELS],
+    "wrong_source": ["./ml:/app/ml/models:ro"],
+    "wrong_target": ["./ml/models:/app/other:ro"],
+}
+
+
+def _compose_copy(tmp_path, monkeypatch, mutate=None):
+    """Point the compose tests at a copy of the real file, changed by `mutate`."""
+    compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
+    if mutate is not None:
+        mutate(compose)
+    (tmp_path / "docker-compose.yml").write_text(yaml.safe_dump(compose))
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+
+
+def test_api_mount_check_accepts_the_real_compose_file(tmp_path, monkeypatch):
+    """Control: the violations below fail because of the mutation, not because of the copy."""
+    _compose_copy(tmp_path, monkeypatch)
+    test_compose_api_has_no_docker_socket()
+
+
+@pytest.mark.parametrize("volumes", _API_MOUNT_VIOLATIONS.values(), ids=_API_MOUNT_VIOLATIONS)
+def test_api_mount_check_rejects_violation(volumes, tmp_path, monkeypatch):
+    def mutate(compose):
+        compose["services"]["api"]["volumes"] = volumes
+
+    _compose_copy(tmp_path, monkeypatch, mutate)
+    with pytest.raises(AssertionError):
+        test_compose_api_has_no_docker_socket()
+
+
+_API_HOST_ACCESS_VIOLATIONS = {
+    "tmpfs": ("tmpfs", ["/app/extra"]),
+    "volumes_from": ("volumes_from", ["postgres"]),
+    "devices": ("devices", ["/dev/sda:/dev/sda"]),
+    "privileged": ("privileged", True),
+    "cap_add": ("cap_add", ["SYS_ADMIN"]),
+    "network_mode_host": ("network_mode", "host"),
+    "pid_host": ("pid", "host"),
+    "ipc_host": ("ipc", "host"),
+}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), _API_HOST_ACCESS_VIOLATIONS.values(), ids=_API_HOST_ACCESS_VIOLATIONS
+)
+def test_api_mount_check_rejects_host_access(key, value, tmp_path, monkeypatch):
+    def mutate(compose):
+        compose["services"]["api"][key] = value
+
+    _compose_copy(tmp_path, monkeypatch, mutate)
+    with pytest.raises(AssertionError):
+        test_compose_api_has_no_docker_socket()
+
+
+def test_api_mount_check_rejects_socket_on_another_service(tmp_path, monkeypatch):
+    def mutate(compose):
+        compose["services"]["postgres"]["volumes"].append(f"{_SOCKET}:{_SOCKET}")
+
+    _compose_copy(tmp_path, monkeypatch, mutate)
+    with pytest.raises(AssertionError, match="docker.sock"):
+        test_compose_api_has_no_docker_socket()
 
 
 def test_compose_defaults_to_disabled_and_builds_image_only_on_request():

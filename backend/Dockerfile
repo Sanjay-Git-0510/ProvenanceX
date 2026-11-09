@@ -33,8 +33,9 @@ RUN set -eu; \
 
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# requirements-ml.txt holds the exact versions the saved models were built with.
+COPY requirements.txt requirements-ml.txt ./
+RUN pip install -r requirements.txt -r requirements-ml.txt
 
 COPY . .
 RUN mkdir -p /app/workspace && chown -R app:app /app

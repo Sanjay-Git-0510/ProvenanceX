@@ -5,6 +5,8 @@ ML packages are imported inside functions because the API image may not include 
 then falls back to the rule-based result and says "ML model unavailable".
 """
 
+import hashlib
+import json
 import logging
 import threading
 from collections.abc import Mapping
@@ -38,12 +40,7 @@ _cache: dict[Path, tuple[Any, LoadedModels]] = {}
 def load_models(model_dir: Path) -> LoadedModels:
     """Return the verified models, reloading whenever the manifest's file digests change."""
     try:
-        from app.ml.artifacts import (
-            RANDOM_FOREST_NAME,
-            ModelArtifactError,
-            load_bundle,
-            read_manifest,
-        )
+        from app.ml.artifacts import ModelArtifactError, load_bundle, read_manifest
     except ImportError as exc:
         raise ModelUnavailable("the ML packages are not installed") from exc
 
@@ -57,10 +54,18 @@ def load_models(model_dir: Path) -> LoadedModels:
             bundle = load_bundle(model_dir)
         except ModelArtifactError as exc:
             raise ModelUnavailable(str(exc)) from exc
-        digest = str(files[RANDOM_FOREST_NAME].get("sha256"))
-        models = LoadedModels(bundle=bundle, model_version=f"rf-sha256:{digest[:16]}")
+        # Parallel tree averaging changes the last bit of a probability from run to run.
+        bundle.random_forest.n_jobs = 1
+        models = LoadedModels(bundle=bundle, model_version=model_version(files))
         _cache[key] = (files, models)
         return models
+
+
+def model_version(files: Mapping[str, Any]) -> str:
+    """A version that changes when any model, threshold or preprocessing file changes."""
+    digests = {name: entry.get("sha256") for name, entry in sorted(files.items())}
+    digest = hashlib.sha256(json.dumps(digests, sort_keys=True).encode()).hexdigest()
+    return f"models-sha256:{digest[:16]}"
 
 
 def clear_cache() -> None:
