@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, Copy, TriangleAlert } from "lucide-react";
 import { NOT_AVAILABLE, shortenMiddle } from "../../lib/format.js";
+import Badge from "./Badge.jsx";
 import Button from "./Button.jsx";
 
 export const HASH_FORMATS = {
@@ -9,11 +10,14 @@ export const HASH_FORMATS = {
   tx: /^0x[0-9a-f]{64}$/i,
   address: /^0x[0-9a-f]{40}$/i,
   uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  // The mock chain's id, exactly as backend/app/blockchain/mock.py writes it. Not a transaction.
+  mockTx: /^mock-tx-[0-9a-f]{32}$/,
 };
 
 /**
  * Shows a hash or ID as plain text, only after it matches the expected format.
  * A value that fails the check is not displayed at all. `reason` explains a missing value.
+ * A mock transaction ID always carries a visible label, and only `kind="mockTx"` accepts one.
  */
 export default function HashValue({ value, kind = "sha256", label = "value", reason, truncate = false }) {
   const [copyState, setCopyState] = useState("idle");
@@ -43,6 +47,7 @@ export default function HashValue({ value, kind = "sha256", label = "value", rea
   const copyLabel = { idle: "Copy", copied: "Copied", failed: "Copy failed" }[copyState];
   return (
     <span className="hash">
+      {kind === "mockTx" ? <Badge tone="mock">mock</Badge> : null}
       <code className="hash__value" title={truncate ? value : undefined}>
         {truncate ? shortenMiddle(value) : value}
       </code>

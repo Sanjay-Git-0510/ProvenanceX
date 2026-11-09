@@ -454,6 +454,153 @@
   font-size: var(--text-12);
 }
 
+/* Graph: a solid surface, so labels never sit on glass. */
+.graph-canvas {
+  max-height: 32rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+}
+
+.graph-canvas svg {
+  display: block;
+}
+
+.graph-edge {
+  fill: none;
+  stroke: var(--line-control);
+  stroke-width: 1;
+}
+
+.graph-edge--inferred {
+  stroke-dasharray: 4 4;
+}
+
+.graph-arrow {
+  fill: var(--line-control);
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node rect {
+  fill: var(--surface-2);
+  stroke: var(--line-control);
+  stroke-width: 1;
+}
+
+.graph-node:hover rect {
+  fill: var(--surface-3);
+}
+
+.graph-node--root rect {
+  stroke: var(--accent);
+}
+
+.graph-node--selected rect {
+  fill: var(--surface-3);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.graph-node__label {
+  fill: var(--text-primary);
+  font-size: var(--text-14);
+  font-weight: 500;
+}
+
+.graph-node__type {
+  fill: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
+.graph-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-14);
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
+.graph-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.graph-row-button {
+  min-height: 1.5rem;
+  color: var(--accent);
+  font-size: var(--text-14);
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.graph-row-button:hover {
+  color: var(--accent-hover);
+}
+
+.graph-row-button[aria-pressed="true"] {
+  font-weight: 600;
+  text-decoration-thickness: 2px;
+}
+
+.graph-inspector__heading {
+  font-size: var(--text-14);
+  font-weight: 600;
+}
+
+.graph-inspector__list {
+  margin-top: var(--space-1);
+  font-size: var(--text-14);
+  overflow-wrap: anywhere;
+}
+
+.graph-inspector__list li {
+  padding-block: var(--space-half);
+}
+
+.graph-inspector__meta {
+  color: var(--text-secondary);
+}
+
+/* Blockchain: four value columns stay readable and scroll inside their own region. */
+.verify__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.verify__reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-14);
+  overflow-wrap: anywhere;
+}
+
+.comparison .table {
+  min-width: 64rem;
+}
+
+.comparison__detail {
+  margin-top: var(--space-half);
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
 @media (min-width: 40rem) {
   .count-strip {
     grid-template-columns: repeat(4, minmax(0, 1fr));

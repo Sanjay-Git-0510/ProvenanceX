@@ -74,7 +74,7 @@ describe("VerificationBadge", () => {
   it("says VERIFIED only means the record is unchanged", () => {
     render(<VerificationBadge state="VERIFIED" />);
     const badge = screen.getByText(/VERIFIED/);
-    expect(badge).toHaveTextContent("record unchanged");
+    expect(badge).toHaveTextContent("record unchanged, not scanner correct");
     expect(hasIcon(badge)).toBe(true);
   });
 
@@ -274,6 +274,44 @@ describe("HashValue", () => {
     expect(container.querySelector("img")).toBeNull();
     expect(container).not.toHaveTextContent(String(value).slice(0, 12));
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  describe("mock transaction IDs", () => {
+    const MOCK_TX = `mock-tx-${"a".repeat(32)}`;
+
+    it("shows an exact mock ID with a visible mock label", () => {
+      const { container } = render(<HashValue kind="mockTx" value={MOCK_TX} />);
+      expect(container.querySelector("code").textContent).toBe(MOCK_TX);
+      expect(screen.getByText("mock")).toBeInTheDocument();
+    });
+
+    it.each([
+      `mock-tx-${"a".repeat(31)}`,
+      `mock-tx-${"a".repeat(33)}`,
+      `mock-tx-${"A".repeat(32)}`,
+      `mock-tx-${"g".repeat(32)}`,
+      `MOCK-TX-${"a".repeat(32)}`,
+      `${MOCK_TX}\n`,
+      ` ${MOCK_TX}`,
+      `0x${"c".repeat(64)}`,
+      "mock-tx-",
+    ])("rejects %j as a mock ID", (value) => {
+      const { container } = render(<HashValue kind="mockTx" value={value} />);
+      expect(screen.getByText("Invalid format")).toBeInTheDocument();
+      expect(container.querySelector("code")).toBeNull();
+      expect(screen.queryByText("mock")).toBeNull();
+    });
+
+    it.each(["tx", "sha256", "address", "uuid", "commit"])("is never accepted as %s", (kind) => {
+      const { container } = render(<HashValue kind={kind} value={MOCK_TX} />);
+      expect(screen.getByText("Invalid format")).toBeInTheDocument();
+      expect(container.querySelector("code")).toBeNull();
+    });
+
+    it("adds no mock label to a real transaction", () => {
+      render(<HashValue kind="tx" value={`0x${"c".repeat(64)}`} />);
+      expect(screen.queryByText("mock")).toBeNull();
+    });
   });
 
   it.each([null, undefined, ""])("shows the reason for a missing value (%s)", (value) => {

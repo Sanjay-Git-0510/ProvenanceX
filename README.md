@@ -7,12 +7,11 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 7, blockchain evidence.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 8, dashboard.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
-> ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. The dashboard
-> has working Dashboard, New Scan, Scan Details, Findings and Risk Analysis pages. The Dependency Graph, Model Lineage,
-> Blockchain Evidence, CI/CD and Settings pages are still placeholders. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. All ten
+> dashboard pages use the real API. The CI/CD page shows the gate rule only, because the GitHub Actions gate arrives in Phase 9. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)

@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import useFindings from "../hooks/useFindings.js";
 import useScan from "../hooks/useScan.js";
 import useScanSelection from "../hooks/useScanSelection.js";
+import useVerification from "../hooks/useVerification.js";
 import { SCAN_B, SCAN_ID, calledUrls, findingsPage, mockApi } from "../test/helpers.jsx";
 
 const future = { v7_startTransition: true, v7_relativeSplatPath: true };
@@ -149,5 +150,67 @@ describe("useFindings", () => {
     const fetchMock = mockApi([]);
     expect(renderHook(() => useFindings(null)).result.current.status).toBe("idle");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVerification", () => {
+  const answer = { state: "VERIFIED", reason: { code: "x", message: "y" }, fields: [] };
+
+  it("is idle and sends nothing until asked", () => {
+    const fetchMock = mockApi([[/\/verify$/, answer]]);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    expect(result.current.status).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the answer", async () => {
+    mockApi([[/\/verify$/, answer]]);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("done");
+    expect(result.current.result.state).toBe("VERIFIED");
+  });
+
+  it("reports a failed request as failed, with no result", async () => {
+    mockApi([[/\/verify$/, { error: { code: "boom", message: "No" } }, 500]]);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("failed");
+    expect(result.current.result).toBeNull();
+    expect(result.current.error.code).toBe("boom");
+  });
+
+  it("forgets the result when the scan changes", async () => {
+    const fetchMock = mockApi([[/\/verify$/, answer]]);
+    const { result, rerender } = renderHook(({ id }) => useVerification(id), { initialProps: { id: SCAN_ID } });
+    await act(() => result.current.verify());
+    rerender({ id: SCAN_B });
+    expect(result.current.status).toBe("idle");
+    expect(result.current.result).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a late answer for the previous scan", async () => {
+    let release;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) }); })),
+    );
+    const { result, rerender } = renderHook(({ id }) => useVerification(id), { initialProps: { id: SCAN_ID } });
+    act(() => { result.current.verify(); });
+    rerender({ id: SCAN_B });
+    await act(async () => { release(); });
+    expect(result.current.status).toBe("idle");
+  });
+
+  it("does not send a second request while one is running", async () => {
+    let release;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) }); }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    act(() => { result.current.verify(); });
+    act(() => { result.current.verify(); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { release(); });
   });
 });

@@ -42,7 +42,7 @@ const columns = [
 export default function RecentScansTable({ scans, empty }) {
   return (
     <DataTable
-      caption="Recent scans"
+      caption="Table of recent scans"
       captionHidden
       columns={columns}
       rows={scans}

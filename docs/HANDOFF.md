@@ -108,10 +108,10 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 8 Milestones 0 (`f97d169`) and A (`3a8d26f`) are committed. Milestone B (Dashboard, New Scan,
-Scan Details, Findings, Risk Analysis) is done and waiting for a browser check and commit.** See
-"Phase 8 progress". Milestone C (Dependency Graph, Model Lineage, Blockchain Evidence, CI/CD, Settings,
-responsive and accessibility pass) is next and is not started; waiting for the go-ahead.
+**Phase 8 Milestones 0 (`f97d169`), A (`3a8d26f`) and B (`da1c3f9`) are committed. Milestone C (Dependency
+Graph, Model Lineage, Blockchain Evidence, CI/CD, Settings, responsive and accessibility pass) is done and
+waiting for the owner's browser check and commit.** See "Phase 8 progress". Phase 9 is not started; waiting for
+the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -156,7 +156,45 @@ Standing notes:
 
 ## Phase 8 progress
 
-- **Milestone B (core pages): complete, not yet committed.**
+- **Milestone C (graph, blockchain, CI/CD, Settings, accessibility): complete, not yet committed.**
+  - **Packages added, exact versions, `--ignore-scripts`:** `@dagrejs/dagre` 3.1.3 (with `@dagrejs/graphlib` 4.0.6)
+    and, dev only, `jest-axe` 11.0.0 (with 13 test-only transitive packages). No other dependency changed.
+  - New: `components/graph/` (`GraphCanvas`, `GraphControls`, `GraphLegend`, `NodeInspector`, `GraphTable`,
+    `GraphView`), `components/blockchain/` (`VerificationPanel`, `FieldComparisonTable`, `AnchorRecord`),
+    `lib/graphLayout.js`, `hooks/useGraph.js`, `hooks/useVerification.js`, and tests `graphLayout`, `graph`,
+    `BlockchainEvidence`, `CiCd`, `Settings`, `a11y`. `pages/PagePlaceholder.jsx` was removed.
+  - **Graph:** `normalizeGraph` is the only code that reads `attributes`; components receive named, sanitized
+    fields. Above 300 visible nodes the drawing is replaced by a notice and the tables stay complete. The SVG is
+    one labelled image, and `GraphTable` is the keyboard and screen-reader equivalent. A scan opened on the wrong
+    graph page gets a link to the right one.
+  - **Verification:** `POST /verify` runs only from the button. A failed request or a response with no state is
+    `failed`: it shows the error and "Not checked yet", never UNKNOWN. Field results come only from the API's
+    per-field `status`, and an unrecognized status never reads as a match. Results are not kept across scan
+    changes or reloads. There is no Anchor button or `/anchor` call.
+  - **Mock IDs:** `HashValue kind="mockTx"` accepts only `^mock-tx-[0-9a-f]{32}$` and draws its own "mock" label.
+    The `tx` format is unchanged. `AnchorRecord` picks `mockTx` only for a mock record.
+  - **CI/CD:** shows the rule and the selected scan's decision. It calls `GET /risk`, so an older scan stores a
+    result on first read, as on Risk Analysis. No pipeline-run data exists, and the page says so.
+  - **Settings:** health and version only, read-only.
+  - **Changes to existing code and tests:** `VerificationBadge` wording; `RecentScansTable` caption, because it
+    duplicated the panel name (a real axe `landmark-unique` violation from Milestone B); `CiCd.jsx` added to the
+    allowlist in `risk.test.jsx` of files that may mention ALLOW.
+  - **Scan Details** still links to Blockchain Evidence, so Verify lives on one page (owner decision).
+  - **Known issue, not changed:** `npm audit` reports 5 advisories (2 critical, 3 moderate) in `react-router`,
+    `react-router-dom`, `vitest`, `@vitest/mocker` and `tinypool`. The count was the same before these packages
+    were added. Not triaged; `react-router` ships at runtime.
+  - **Verified on this machine (2026-11-09), host Node 26:**
+    - `npm run lint`: clean. `npm run build`: succeeded; no CDN host in the build output
+    - `npm test -- --run`: 478 passed, 0 failed, 0 skipped (20 files), including jest-axe on all 10 pages
+    - Breaking the code on purpose made tests fail in all 22 cases, after one gap was closed: removing the
+      not-evaluated layers on CI/CD first passed, so a stricter test was added. Each change was restored
+  - **Not run:** the pages in a real browser (the owner checks this; layout, responsiveness and SVG rendering are
+    unchecked, because jsdom has no layout), comparison with a live API response (the API was not running, so
+    fields were checked against the backend schemas and code), a frontend image build, frontend checks on Node 22
+    (the CI version), the CI workflow on GitHub, ruff and pytest (no backend file changed). jest-axe cannot measure
+    colour contrast in jsdom; the token test covers it.
+
+- **Milestone B (core pages): complete and committed (`da1c3f9`).**
   - Real pages on the real API: Dashboard, New Scan, Scan Details, Findings, Risk Analysis. New hooks
     `useScan`, `useScanSelection`, `useFindings`; `lib/policyDisplay.js`; `components/{scan,risk,findings}/`;
     `styles/pages.css`; page tests plus `src/test/helpers.jsx`. No new npm package.
@@ -175,7 +213,7 @@ Standing notes:
     only, which already have a stored decision, so listing computes nothing. Risk Analysis does the same
     first-read computation when an older scan is chosen.
   - **Not derived:** no LOW/MEDIUM/HIGH risk band, because the API gives only a confidence label.
-  - **Scan Details links** to `/graph`, `/lineage` and `/blockchain`, which stay placeholders until Milestone C.
+  - **Scan Details links** to `/graph`, `/lineage` and `/blockchain`, which were placeholders until Milestone C.
   - **Verified on this machine (2026-11-09), host Node 26:**
     - `npm run lint`: clean. `npm run build`: succeeded; no CDN host in the build output
     - `npm test -- --run`: 375 passed, 0 failed, 0 skipped (14 files)

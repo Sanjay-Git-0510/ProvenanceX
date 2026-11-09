@@ -48,6 +48,7 @@ describe("ALLOW always carries its caveat", () => {
       .sort();
     expect(painters).toEqual([
       "AllowCaveat.jsx",
+      "CiCd.jsx",
       "DecisionBadge.jsx",
       "DecisionDisplay.jsx",
       "DecisionSummary.jsx",

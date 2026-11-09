@@ -2,7 +2,7 @@ import { CircleDashed, Link2Off, ShieldCheck } from "lucide-react";
 import Badge from "./Badge.jsx";
 
 const STATES = {
-  VERIFIED: { tone: "allow", icon: ShieldCheck, note: "record unchanged" },
+  VERIFIED: { tone: "allow", icon: ShieldCheck, note: "record unchanged, not scanner correct" },
   MISMATCH: { tone: "block" },
   "NOT ANCHORED": { tone: "neutral", icon: Link2Off },
   UNKNOWN: { tone: "unknown" },
