@@ -2,7 +2,7 @@
 
 ## STATUS
 
-_Last updated: 2026-11-08_
+_Last updated: 2026-11-09_
 
 - **Phase 0 (foundation): complete.**
 - **Phase 1 (software ingestion, SHA-256, URL/upload validation, safe workspace): complete.**
@@ -64,6 +64,8 @@ _Last updated: 2026-11-08_
   Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
   42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
   under "Phase 5 progress".
+- **Phase 6 (fusion, policy, SHAP, explanation API): in progress.** Milestone A is complete and
+  awaiting commit. Milestones B and C are not started. Details are under "Phase 6 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -91,13 +93,54 @@ _Last updated: 2026-11-08_
 
 ## Next step
 
-**Phase 6 (fusion, policy, SHAP, explanation API):** not started. Wait for the go-ahead. Under the
-agent rules in `CLAUDE.md`, inspect the repo and propose the Phase 6 file list for approval first.
+**Phase 6 Milestone B (SHAP, explanation API, RiskDecision):** not started. Wait for the go-ahead.
+The approved file list is B: `app/risk/model_runtime.py`, `explain.py`, `service.py`,
+`app/schemas/risk.py`, migration `0005`, the `/risk` route, the `shap` pin and tests.
 
-Notes for Phase 6:
-- Do not retune thresholds or hyperparameters against the Phase 5 test split.
+Notes for the rest of Phase 6:
+- Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
 - Null evidence must lower confidence and never read as clean. See the false-positive finding below.
-- Loading artifacts built on Python 3.14 from the 3.12 API image is untested.
+- Loading artifacts built on Python 3.14 from the 3.12 API image is untested. Milestone C needs
+  Docker Desktop running, because this machine has no Python 3.12. If the check fails, stop and ask.
+- Check `shap` 0.54.1 against scikit-learn 1.9.1 first in Milestone B. If incompatible, stop and ask.
+
+## Phase 6 progress
+
+- **Milestone A (fusion and policy): complete, awaiting commit.**
+  - New: `app/risk/policy_config.py`, `types.py`, `layers.py`, `fusion.py`, `policy.py`,
+    `sensitivity.py`, `ml/scripts/fusion_sensitivity.py`, the generated
+    `ml/reports/fusion_sensitivity.{md,json}`, `tests/risk_helpers.py` and five `test_risk_*` files.
+    Design and the ML trade-off are in `docs/architecture.md`. Pure logic; not wired into scans.
+  - Weights, thresholds and hard rules are **hand-set research parameters, not tuned or validated**.
+  - **Added beyond the plan:**
+    - ML is limited to the rule-only decision band, so ML cannot change the decision in either
+      direction, for any weights. The approved numeric cap alone would not have guaranteed that.
+    - `risk_score` is null when no rule layer can be scored, so Phase 7 must handle a null score.
+    - `sensitivity.py`, its script and `risk_helpers.py` were not in the original file list.
+  - **Sensitivity (synthetic validation split, 348 records, analysis only):** baseline ALLOW 92,
+    REVIEW 173, BLOCK 83. Each layer weight changed at most 3 decisions at +/-20%; `max_blend`
+    changed 12 at 0.8x and 14 at 1.2x; ML weights changed none, by construction. The test split was
+    not used. The result is in a separate report because `evaluation_report.md` is generated.
+  - **Observed, not acted on:** with the sandbox off, a first scan using test-helper evidence
+    scored confidence 0.67 when `revision_pinned` and `version_consistency` were known (ALLOW), and
+    0.59 when they were not, as is likely for an upload (REVIEW). Measured on helper inputs, not
+    real scans. Re-check in Milestone C.
+  - **Verified on this machine (2026-11-09), Python 3.14:**
+    - The exact CI ruff commands (`backend/` and `ml/scripts/`): clean
+    - **Milestone A total: 1906 passing, 0 failed, 0 skipped, 42 deselected**, from two runs:
+      - `pytest -m "not network and not sandbox"` without Postgres: 1899 passed, 7 skipped
+      - `pytest tests/integration/test_db_connection.py` against Compose Postgres on 5433: those
+        7 passed, 0 skipped
+    - The PostgreSQL tests need the `DATABASE_URL` documented in this file (under "Verified on this
+      machine"), because the local `.env` does not set the database user or password. Without it
+      they skip.
+    - `fusion_sensitivity.py`: ran end to end and wrote the report
+  - **Not run:** `pytest -m network`, `pytest -m sandbox`, frontend tests, Docker builds, and any
+    test on Python 3.12.
+  - **Test count:** Milestone A added 136 tests to the 1770 recorded for Phase 5: 130 in the
+    `test_risk_*` files, plus 6 because the unsafe-loader security test
+    (`test_application_code_has_no_unsafe_loader`) runs once per application file and Milestone A
+    added six risk modules. Confirmed by diffing `pytest --collect-only` against commit `203dab8`.
 
 ## Phase 5 progress
 

@@ -25,5 +25,13 @@ backend/.venv/bin/python ml/scripts/evaluate_models.py
 
 Writes `ml/reports/evaluation_report.md` and `.json`.
 
+Then the fusion sensitivity analysis (validation split only, fits nothing):
+
+```bash
+backend/.venv/bin/python ml/scripts/fusion_sensitivity.py
+```
+
+Writes `ml/reports/fusion_sensitivity.md` and `.json`.
+
 Dataset generation requires the seed templates in `backend/tests/fixtures/ml/seeds/`, so it runs from a source
 checkout, not inside the API image (which excludes `tests/`).

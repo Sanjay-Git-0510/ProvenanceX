@@ -1,0 +1,184 @@
+{
+  "baseline_decisions": {
+    "ALLOW": 92,
+    "BLOCK": 83,
+    "REVIEW": 173
+  },
+  "dataset_sha256": "d01885bf8a1517923f43c1511fae23589fdabf14cbb72099d1a370d2f8388ab8",
+  "format": "provenancex-fusion-sensitivity-v1",
+  "policy_version": "provenancex-policy-v1-handset",
+  "records": 348,
+  "rows": [
+    {
+      "decisions_changed": 2,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.004652897721579483,
+      "parameter": "vulnerability",
+      "share_changed": 0.005747126436781609,
+      "transitions": {
+        "BLOCK->REVIEW": 1,
+        "REVIEW->ALLOW": 1
+      }
+    },
+    {
+      "decisions_changed": 2,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0049952356821847625,
+      "parameter": "provenance_integrity",
+      "share_changed": 0.005747126436781609,
+      "transitions": {
+        "REVIEW->ALLOW": 1,
+        "REVIEW->BLOCK": 1
+      }
+    },
+    {
+      "decisions_changed": 1,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0031743926068488935,
+      "parameter": "graph",
+      "share_changed": 0.0028735632183908046,
+      "transitions": {
+        "REVIEW->BLOCK": 1
+      }
+    },
+    {
+      "decisions_changed": 1,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0037277039578681058,
+      "parameter": "static",
+      "share_changed": 0.0028735632183908046,
+      "transitions": {
+        "REVIEW->ALLOW": 1
+      }
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0018942799854268994,
+      "parameter": "behavioral",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0014182810855323318,
+      "parameter": "ai_specific",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.0055744201964554665,
+      "parameter": "ml_supervised",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.00039432714828146434,
+      "parameter": "ml_anomaly",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 12,
+      "factor": 0.8,
+      "mean_absolute_score_change": 0.027129484999565814,
+      "parameter": "max_blend",
+      "share_changed": 0.034482758620689655,
+      "transitions": {
+        "BLOCK->REVIEW": 3,
+        "REVIEW->ALLOW": 9
+      }
+    },
+    {
+      "decisions_changed": 3,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.004716688938757948,
+      "parameter": "vulnerability",
+      "share_changed": 0.008620689655172414,
+      "transitions": {
+        "REVIEW->ALLOW": 1,
+        "REVIEW->BLOCK": 2
+      }
+    },
+    {
+      "decisions_changed": 3,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.004791103921203827,
+      "parameter": "provenance_integrity",
+      "share_changed": 0.008620689655172414,
+      "transitions": {
+        "BLOCK->REVIEW": 1,
+        "REVIEW->ALLOW": 2
+      }
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.0029573705963357893,
+      "parameter": "graph",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 2,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.003286588654024476,
+      "parameter": "static",
+      "share_changed": 0.005747126436781609,
+      "transitions": {
+        "ALLOW->REVIEW": 1,
+        "REVIEW->ALLOW": 1
+      }
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.0017812887233332384,
+      "parameter": "behavioral",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.0011243500221843198,
+      "parameter": "ai_specific",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.005099647215946949,
+      "parameter": "ml_supervised",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 0,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.0003910819251846954,
+      "parameter": "ml_anomaly",
+      "share_changed": 0.0,
+      "transitions": {}
+    },
+    {
+      "decisions_changed": 14,
+      "factor": 1.2,
+      "mean_absolute_score_change": 0.027029022325774896,
+      "parameter": "max_blend",
+      "share_changed": 0.040229885057471264,
+      "transitions": {
+        "ALLOW->REVIEW": 4,
+        "REVIEW->BLOCK": 10
+      }
+    }
+  ],
+  "split": "validation",
+  "synthetic": true
+}

@@ -308,6 +308,46 @@ scan pipeline yet (Phase 6). The API image does not include the ML packages.
 
 Details are in `ml/README.md`.
 
+### Phase 6 fusion and policy (`app/risk/`)
+
+Not wired into the scan pipeline until Phase 6 Milestone C.
+
+**Parameters.** Every weight, threshold and hard rule is in `app/risk/policy_config.py`. They are
+hand-set research parameters. They have not been tuned or validated on any data and are not
+security standards. Do not adjust them after looking at test-split results.
+
+**Layers.** Vulnerability, provenance/integrity, graph, static, behavioral, AI-specific, plus the
+Random Forest and Isolation Forest outputs. XGBoost is reported for comparison and is not fused.
+
+**Score.** `risk = max_blend x highest rule layer + (1 - max_blend) x weighted mean of scored
+layers`. Each layer's additive contribution is recorded. Contributions plus `ml_band_adjustment`
+equal `risk_score`. If no rule layer can be scored, `risk_score` is null and the decision is REVIEW.
+CVSS, ML probability and the ProvenanceX risk stay separate values.
+
+**Missing evidence.** A null feature is "not evaluated". A layer with no usable evidence has a null
+score and is left out of the score rather than averaged in as 0. Confidence is weighted evidence
+coverage: a feature from a partial stage earns half credit, and a skipped, failed, unavailable or
+mock one earns none. Features with no collector, and layers that do not apply, are excluded. ML
+adds no confidence. Findings from a partial stage can raise a score; a quiet partial stage has none.
+
+**Decision.** The strictest of the rule-only score band, the hard rules and the evidence gates. An
+ALLOW needs every required layer scored (software: vulnerability, provenance, static; AI:
+provenance, static, AI-specific) and confidence of at least 0.60. Every ALLOW carries its reason,
+confidence and the layers not evaluated, so a default scan with the sandbox off can be ALLOW only
+in that form. Hard rules set a minimum decision and do not alter the score. `hash_changed` from a
+new commit is normal and is not a hard failure; `hash_consistency` and `download_integrity` are.
+
+**Deliberate trade-off: ML alone cannot change the decision.** The decision band comes from the
+rule-only score, and the fused score is limited to that band. High ML output cannot raise the
+decision, and low ML output cannot lower it, for any weights. The cost is that a threat only the
+model sees does not trigger REVIEW; it appears only in the score and explanation. The reason is
+measured, on synthetic data: the Random Forest flagged 19 of 26 benign test records with no hash
+comparison (0.731, against 0.097 with one), and every first scan has no hash comparison.
+
+**Sensitivity.** `ml/reports/fusion_sensitivity.md` moves each weight by plus and minus 20 percent
+on the synthetic validation split and counts changed decisions. It is analysis only: it fits
+nothing, does not use the test split, and does not validate the parameters.
+
 ## 5. Data model (PostgreSQL)
 
 | Entity | Key fields | Phase |

@@ -122,3 +122,15 @@ real run. Never edit them by hand. The report opens with what synthetic data mea
   validation split by the same procedure. Nothing is chosen after seeing test results.
 - Undefined metrics are `n/a`, never 0.
 - Baselines report how many records they could not evaluate.
+
+### Fusion sensitivity
+
+`ml/reports/fusion_sensitivity.md` and `.json` are written by `ml/scripts/fusion_sensitivity.py`.
+Each fusion weight, and the blend parameter, is moved by plus and minus 20 percent, one at a time,
+and changed ALLOW/REVIEW/BLOCK decisions are counted on the 348 synthetic validation records.
+
+This is analysis only. Nothing is fitted, test rows are discarded unparsed, and it does not show
+that the hand-set weights or any decision are correct. Observed: each layer weight changed at most
+3 of 348 decisions, and the blend parameter changed 12 (at 0.8x) and 14 (at 1.2x). ML weights
+changed none, by construction, because ML cannot change the decision. Validation records hold
+features only, so rules needing findings or provenance checks are not exercised.
