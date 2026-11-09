@@ -1,12 +1,17 @@
-import { Link } from "react-router-dom";
+import { CircleQuestionMark } from "lucide-react";
+import EmptyState from "../components/EmptyState.jsx";
+import Button from "../components/ui/Button.jsx";
 
 export default function NotFound() {
   return (
-    <section className="empty-state">
-      <h1>Page not found</h1>
-      <p>
-        <Link to="/">Back to Dashboard</Link>
-      </p>
-    </section>
+    <EmptyState
+      title="Page not found"
+      icon={CircleQuestionMark}
+      action={
+        <Button to="/" variant="secondary">
+          Back to Dashboard
+        </Button>
+      }
+    />
   );
 }

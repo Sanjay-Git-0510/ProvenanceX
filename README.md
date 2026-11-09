@@ -11,7 +11,7 @@ takes a software repo or package, or an AI model artifact, and does the followin
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
 > ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. The dashboard
-> is not built yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> shell and base components exist, but its pages are still placeholders. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -54,6 +54,11 @@ cd frontend
 npm install
 npm run dev                                   # proxies /api to localhost:8000
 ```
+
+The frontend is dark only. Its design tokens are in `frontend/src/styles/tokens.css`, and a test checks
+WCAG AA contrast for each colour on its actual background. Onest and IBM Plex Mono (Latin 400 and 500)
+are self-hosted through npm packages, so the app loads nothing from an external CDN. After changing
+frontend dependencies, rebuild the Compose image with `docker compose build frontend`.
 
 ## Tests and lint
 

@@ -1,20 +1,24 @@
 import { NavLink } from "react-router-dom";
-import { routes } from "../routes.js";
+import { navGroups } from "../routes.js";
 
-export default function Nav() {
+export default function Nav({ id, open = false }) {
   return (
-    <nav className="nav" aria-label="Main">
-      <ul>
-        {routes
-          .filter((r) => r.nav)
-          .map((r) => (
-            <li key={r.path}>
-              <NavLink to={r.path} end={r.path === "/"}>
-                {r.label}
-              </NavLink>
-            </li>
-          ))}
-      </ul>
+    <nav id={id} className={`rail${open ? " rail--open" : ""}`} aria-label="Main">
+      {navGroups.map((group) => (
+        <div className="rail__group" key={group.name}>
+          <p className="rail__heading">{group.name}</p>
+          <ul>
+            {group.items.map(({ path, label, icon: Icon }) => (
+              <li key={path}>
+                <NavLink className="rail__link" to={path} end={path === "/"}>
+                  <Icon size={16} aria-hidden="true" />
+                  {label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </nav>
   );
 }

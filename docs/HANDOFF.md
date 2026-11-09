@@ -108,9 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 is complete and committed (`e28d7b9`). Phase 8 Milestone 0 (`GET /api/v1/scans`) is done
-and waiting to be committed.** See "Phase 8 progress". Milestone A (frontend foundation) is next
-and is not started; waiting for the go-ahead.
+**Phase 8 Milestone 0 is committed (`f97d169`). Milestone A (frontend foundation) is done and waiting
+to be committed.** See "Phase 8 progress". Milestone B (Dashboard, New Scan, Scan Details, Findings,
+Risk Analysis) is next and is not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -155,7 +155,37 @@ Standing notes:
 
 ## Phase 8 progress
 
-- **Milestone 0 (`GET /api/v1/scans`): complete, not yet committed.** Read-only and paginated, newest
+- **Milestone A (frontend foundation): complete, not yet committed.**
+  - **Packages added (exact versions, nothing else):** `@fontsource-variable/onest` 5.3.1,
+    `@fontsource/ibm-plex-mono` 5.3.0 (Latin 400 and 500 only), `lucide-react` 1.70.0.
+  - New: `styles/{tokens,layout,components}.css`; `components/ui/` (`Button`, `Badge`, `DecisionBadge`,
+    `VerificationBadge`, `MockLabel`, `Panel`, `DataTable`, `Pagination`, `LoadingState`, `ErrorState`,
+    `HashValue`, `Modal`); `hooks/useApi.js`; `lib/{format,sanitizeDisplay,evidenceLinks}.js`; tests
+    `tokens.contrast`, `ui`, `api`, `sanitizeDisplay`, `format`. Pages are still placeholders.
+  - **Dropped from the plan:** `lib/recentScans.js`, because `GET /scans` replaced the browser-local list.
+  - **Rules enforced by tests:** AA contrast on actual backgrounds, including glass over the lightest
+    backdrop; type, spacing and motion scales; no gradients, external URLs or raw HTML in the source; glass
+    only through the approved classes, with a solid fallback. The glass-class test lists `Layout.jsx` and
+    `StatusBadge.jsx`, so add the hero file to it in Milestone B.
+  - **Null handling:** a null decision or score shows "Not computed yet", and a real 0 stays 0.
+    `HashValue` shows a value only as plain text after it matches its format (`sha256`, `commit`, `tx`,
+    `address`, `uuid`); anything else shows "Invalid format" and the value is not displayed.
+  - **For Milestone C:** the mock chain's `tx_hash` is `mock-tx-<hex>`, which fails the `tx` format and
+    so shows "Invalid format". Decide whether to add a labeled mock format.
+  - **For Milestone B:** `/findings` and `/graph` are not sanitized by the backend, so render named fields
+    through `sanitizeDisplay` and never render `details` or `attributes` as a blob.
+  - No backend, contract, ML, Compose or CI file changed.
+  - **Verified on this machine (2026-11-09), host Node 26:**
+    - `npm run lint`: clean
+    - `npm test -- --run`: 240 passed, 0 failed, 0 skipped (6 files)
+    - `npm run build`: succeeded; no CDN host in the build output
+    - Breaking the code on purpose made tests fail in all 10 cases, including null risk as 0, null decision
+      as ALLOW, no hash format check, low-contrast text, thin glass and an added gradient. Each was restored
+  - **Not run:** the app in a real browser (none is installed here, so layout, responsiveness, blur and
+    rendered fonts are unchecked), a frontend image build, frontend checks on Node 22 (the CI version), the
+    CI workflow on GitHub, ruff and pytest (no backend file changed).
+
+- **Milestone 0 (`GET /api/v1/scans`): complete and committed (`f97d169`).** Read-only and paginated, newest
   first (`created_at`, then `id`). `limit` defaults to 20, maximum 100; optional `offset` and `status`.
   - New: `app/schemas/scan_list.py`, `tests/api/test_scans_list.py`. Changed: `app/api/scans.py`, one
     Postgres test in `tests/integration/test_db_connection.py`.
