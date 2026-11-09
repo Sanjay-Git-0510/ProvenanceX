@@ -19,9 +19,17 @@ const GATE = {
   ALLOW: { tone: "allow", label: "Would pass the pipeline" },
 };
 
-function GateOutcome({ decision }) {
-  if (!Object.hasOwn(GATE, decision ?? "")) return <Badge tone="unknown">No gate outcome: no decision</Badge>;
-  const { tone, label } = GATE[decision];
+// Mirrors `evaluate` in scripts/ci_gate.py, in the same order.
+function gateOutcome({ decision, risk_score: score, status, contains_mock_evidence: mock }) {
+  if (!Object.hasOwn(GATE, decision ?? "")) return { tone: "unknown", label: "Would fail: no decision" };
+  if (mock !== false) return { tone: "unknown", label: "Would fail: mock evidence (unless --allow-mock is set)" };
+  if (decision === "BLOCK") return GATE.BLOCK;
+  if (status !== "computed" || typeof score !== "number") return { tone: "unknown", label: "Would fail: no risk score" };
+  return GATE[decision];
+}
+
+function GateOutcome({ result }) {
+  const { tone, label } = gateOutcome(result);
   return <Badge tone={tone}>{label}</Badge>;
 }
 
@@ -52,7 +60,7 @@ function SelectedScan({ scanId }) {
         <div className="dl__row">
           <dt>Under the gate rule</dt>
           <dd>
-            <GateOutcome decision={data.decision} />
+            <GateOutcome result={data} />
           </dd>
         </div>
       </dl>
@@ -69,8 +77,8 @@ export default function CiCd() {
         <div>
           <h1>CI/CD</h1>
           <p className="page-head__lede">
-            How the decision of a scan maps to the pipeline gate. The GitHub Actions gate arrives in Phase 9, so this page shows
-            the rule, not a pipeline result.
+            How the decision of a scan maps to the pipeline gate. The GitHub Actions gate does not report back here, so this
+            page shows the rule, not a pipeline result.
           </p>
         </div>
       </header>
@@ -83,7 +91,8 @@ export default function CiCd() {
             <li>BLOCK fails the pipeline.</li>
             <li>REVIEW passes by default. An optional strict setting makes it fail.</li>
             <li>ALLOW passes.</li>
-            <li>No decision gives no gate outcome.</li>
+            <li>A failed scan, no decision or no risk score fails the pipeline.</li>
+            <li>Mock evidence fails the pipeline unless the gate is run with --allow-mock.</li>
           </ul>
         </Panel>
         <Panel title="Selected scan" className="span-7">

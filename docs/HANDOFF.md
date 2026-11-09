@@ -108,10 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 8 Milestones 0 (`f97d169`), A (`3a8d26f`) and B (`da1c3f9`) are committed. Milestone C (Dependency
-Graph, Model Lineage, Blockchain Evidence, CI/CD, Settings, responsive and accessibility pass) is done and
-waiting for the owner's browser check and commit.** See "Phase 8 progress". Phase 9 is not started; waiting for
-the go-ahead.
+**Phase 8 is complete and committed (latest: Milestone C, `a17a016`). Phase 9 Milestone A (CI gate) is done and
+waiting for the owner's commit and first GitHub run.** See "Phase 9 progress". Milestones B (end-to-end fixtures)
+and C (demo and docs) are not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -154,9 +153,61 @@ Standing notes:
 - Factors with `evaluated=false` describe missing evidence and must look different from measured
   factors. Show `training_data.notice` wherever ML output appears, and label `contains_mock_evidence`.
 
+## Phase 9 progress
+
+- **Milestone A (CI gate): complete, not yet committed.**
+  - New: `scripts/ci_gate.py` (standard library only), `.github/workflows/provenancex-gate.yml`,
+    `backend/tests/unit/test_ci_gate.py`, `backend/tests/unit/test_gate_workflow.py`. Changed: `ci.yml` and the
+    Makefile (ruff covers `scripts/`; new `make gate`), `pages/CiCd.jsx` and its test, `CLAUDE.md`, `README.md`.
+  - **Owner decisions (2026-11-09), recorded in `CLAUDE.md` as deliberate extensions of "fails only on BLOCK":**
+    REVIEW with a null risk score exits 2, and mock evidence exits 2 unless `--allow-mock` is set. The end-to-end
+    test stays local only.
+  - **Exit codes:** 0 ALLOW, or REVIEW by default, with a real score. 1 BLOCK, or REVIEW with `--fail-on-review`.
+    2 failed scan, timeout, API error, no or unrecognized decision, null score on ALLOW or REVIEW, or mock evidence
+    without `--allow-mock`. Mock is checked before BLOCK, so a BLOCK built on mock evidence is also exit 2. A
+    missing mock flag counts as mock.
+  - **Job summary:** decision, score, confidence, not-evaluated and partial layers, hard rules fired, mock label,
+    ML status, training-data notice. It writes only validated identifiers and escaped server notices, and no
+    artifact-derived text. The script sends no credentials and follows no redirects.
+  - **Workflow:** `pull_request` and `workflow_dispatch`, `permissions: contents: read`, no secrets, no
+    `pull_request_target`, `persist-credentials: false`. It scans `simple_python_project` by default, not this
+    repository, whose test fixtures would skew the result. Trained models are git-ignored, so results on a runner
+    are rule-based and report "ML model unavailable".
+  - **Action pin:** `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` (`v4`), read from the GitHub API
+    and confirmed with `git ls-remote` on 2026-11-09. It is the only action in the workflow, so none is listed as
+    not verified. `ci.yml` keeps its existing tags, because only new actions were in scope.
+  - **Beyond the approved list:** `CiCd.jsx` changed more than its text. The page must not contradict the two owner
+    decisions, so its outcome now follows the same order as `evaluate` in the script.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands, now including `scripts/`: clean. `alembic check`: no drift
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres, Python 3.14: 2554 passed,
+      0 failed, 0 skipped, 72 deselected
+    - `npm run lint`: clean. `npm test -- --run`: 483 passed, 0 failed, 0 skipped (20 files). `npm run build`:
+      succeeded; no CDN host in the build output
+    - `npx hardhat test` in the Compose image: 32 passing. `check-abi.js`: match (17 entries)
+    - Breaking the code on purpose made tests fail in all 36 cases, after one gap was closed: the redirect test
+      could not see a followed redirect, so it was rewritten. One case (allowing special files) was caught as a
+      hang on a FIFO rather than a failed assertion. Each change was restored
+    - **Gate against a disposable Compose API** (separate project and ports, real Syft and OSV, removed afterwards;
+      the models were mounted, so ML was available, unlike on a runner). These are wiring checks on benign
+      fixtures, not detection results:
+
+      | Fixture | Options | Decision | Score | Confidence | Exit |
+      |---|---|---|---|---|---|
+      | `simple_python_project` | none | REVIEW | 0.483 | 0.630 | 0 |
+      | `lora_adapter` | `--kind model` | REVIEW | 0.451 | 0.688 | 0 |
+      | `remote_code_model` | `--kind model --fail-on-review` | REVIEW | 0.520 | 0.475 | 1 |
+      | `simple_python_project`, mock SBOM and OSV | none | REVIEW | 0.350 | 0.341 | 2 |
+      | `simple_python_project`, mock SBOM and OSV | `--allow-mock` | REVIEW | 0.350 | 0.341 | 0 |
+    - The script's `--help` ran on Python 3.12.16 in the API image
+  - **Not run:** the GitHub run of the new workflow, and CI on GitHub (both need a push); a live BLOCK through the
+    gate (exit 1 on BLOCK is tested against a fake server and the real schema; the live BLOCK fixture is Milestone B);
+    the gate's test suite on Python 3.12; `pytest -m network`, `sandbox` and `chain` (the 72 deselected; no code they
+    cover changed); frontend checks on Node 22; the pages in a browser (the CI/CD page changed).
+
 ## Phase 8 progress
 
-- **Milestone C (graph, blockchain, CI/CD, Settings, accessibility): complete, not yet committed.**
+- **Milestone C (graph, blockchain, CI/CD, Settings, accessibility): complete and committed (`a17a016`).**
   - **Packages added, exact versions, `--ignore-scripts`:** `@dagrejs/dagre` 3.1.3 (with `@dagrejs/graphlib` 4.0.6)
     and, dev only, `jest-axe` 11.0.0 (with 13 test-only transitive packages). No other dependency changed.
   - New: `components/graph/` (`GraphCanvas`, `GraphControls`, `GraphLegend`, `NodeInspector`, `GraphTable`,

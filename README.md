@@ -7,11 +7,11 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 8, dashboard.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 9, CI gate and end-to-end.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
 > ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. All ten
-> dashboard pages use the real API. The CI/CD page shows the gate rule only, because the GitHub Actions gate arrives in Phase 9. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> dashboard pages use the real API. The CI/CD page shows the gate rule only, because the gate does not report runs back to it. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -263,6 +263,28 @@ gone, including any made before this volume existed, report `UNKNOWN`.
 
 The full steps and the on-chain encoding are in [contracts/README.md](contracts/README.md). Use only
 Hardhat's public test keys, and never a real key.
+
+## CI gate
+
+`scripts/ci_gate.py` submits a directory to the API, waits for the scan, reads the real decision and writes a job
+summary. It needs only Python 3.11 or newer. `.github/workflows/provenancex-gate.yml` runs it on a disposable API, with
+`contents: read` and no secrets.
+
+```bash
+docker compose up --build --wait api
+python3 scripts/ci_gate.py path/to/project                    # or: make gate GATE_PATH=path/to/project
+python3 scripts/ci_gate.py path/to/model --kind model --fail-on-review
+```
+
+| Exit | Meaning |
+|---|---|
+| 0 | ALLOW, or REVIEW by default, with a real risk score |
+| 1 | BLOCK, or REVIEW with `--fail-on-review` |
+| 2 | No trustworthy result: failed scan, timeout, API error, no or unrecognized decision, ALLOW or REVIEW with a null score, or mock evidence without `--allow-mock` |
+
+Exit 2 also fails the job. It deliberately extends "fails only on BLOCK", so a missing result can never pass.
+Trained models are git-ignored, so on a CI runner the score is rule-based and the summary says "ML model unavailable".
+A pass is not a statement that an artifact is safe: read the not-evaluated layers and the confidence in the summary.
 
 ## Safety
 

@@ -1,0 +1,53 @@
+name: ProvenanceX gate
+
+# Example gate. It scans one directory of this repository with a disposable API on the runner.
+# BLOCK fails the job. REVIEW passes unless fail_on_review is set. A scan with no trustworthy
+# result (exit 2) also fails. Trained models are git-ignored, so results here are rule-based and
+# report "ML model unavailable". To gate your own project, point GATE_PATH at it.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: Directory to scan
+        required: false
+        default: backend/tests/fixtures/software/simple_python_project
+      kind:
+        description: Scan type
+        required: false
+        default: software
+        type: choice
+        options: [software, model]
+      fail_on_review:
+        description: Fail the job on REVIEW
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Passed through the environment, so an input can never become shell code.
+      GATE_PATH: ${{ inputs.scan_path || 'backend/tests/fixtures/software/simple_python_project' }}
+      GATE_KIND: ${{ inputs.kind || 'software' }}
+      GATE_FAIL_ON_REVIEW: ${{ inputs.fail_on_review || 'false' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Start the API
+        run: docker compose up --build --wait --wait-timeout 300 api
+      - name: Run the gate
+        run: |
+          set -u
+          extra=()
+          if [ "$GATE_FAIL_ON_REVIEW" = "true" ]; then extra+=(--fail-on-review); fi
+          python3 scripts/ci_gate.py "$GATE_PATH" --kind "$GATE_KIND" "${extra[@]}"
+      - name: Stop the API
+        if: always()
+        run: docker compose down -v

@@ -62,6 +62,11 @@ RISK + POLICY
 - Final score must be traceable to: vulnerability, provenance/integrity, graph, static, behavioral, AI-specific signals, and ML outputs.
 - Keep CVSS, ML probability, and ProvenanceX risk as separate, clearly labeled values.
 
+CI gate owner decisions (2026-11-09), deliberate extensions of "fails only on BLOCK" in Phase 9:
+- REVIEW with a null risk score exits 2 and fails the job, because no rule layer could be scored.
+- A decision that used mock evidence exits 2 unless the gate is run with --allow-mock.
+A scan that fails, times out or has no recognized decision also exits 2, so it can never pass.
+
 API
 POST /api/v1/scans/software
 POST /api/v1/scans/model

@@ -29,16 +29,31 @@ describe("CI/CD", () => {
     expect(container.querySelector(".allow-caveat")).toHaveTextContent(/Not evaluated:.*vulnerability/i);
   });
 
-  it("gives no outcome without a decision and keeps the score null", async () => {
+  it("fails without a decision and keeps the score null", async () => {
     open(noRisk("not_computed", "scan_failed", "The scan failed"));
-    expect(await screen.findByText("No gate outcome: no decision")).toBeInTheDocument();
+    expect(await screen.findByText("Would fail: no decision")).toBeInTheDocument();
     expect(screen.getByText("The scan failed")).toBeInTheDocument();
     expect(screen.getByText("ProvenanceX risk").closest(".dl__row")).toHaveTextContent("Not computed yet");
   });
 
   it("does not trust an unrecognized decision", async () => {
     open(riskResult({ decision: "constructor" }));
-    expect(await screen.findByText("No gate outcome: no decision")).toBeInTheDocument();
+    expect(await screen.findByText("Would fail: no decision")).toBeInTheDocument();
+  });
+
+  it("fails REVIEW with a null score", async () => {
+    open(riskResult({ decision: "REVIEW", status: "not_computed", risk_score: null }));
+    expect(await screen.findByText("Would fail: no risk score")).toBeInTheDocument();
+  });
+
+  it("keeps BLOCK with a null score as BLOCK", async () => {
+    open(riskResult({ decision: "BLOCK", status: "not_computed", risk_score: null }));
+    expect(await screen.findByText("Would fail the pipeline")).toBeInTheDocument();
+  });
+
+  it.each(["ALLOW", "REVIEW", "BLOCK"])("fails %s with mock evidence", async (decision) => {
+    open(riskResult({ decision, contains_mock_evidence: true }));
+    expect(await screen.findByText(/Would fail: mock evidence/)).toBeInTheDocument();
   });
 
   it("says plainly that no pipeline runs exist", async () => {

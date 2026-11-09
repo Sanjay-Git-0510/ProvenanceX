@@ -1,7 +1,7 @@
 # Thin wrappers around common commands. Run from the repo root.
 PY := backend/.venv/bin
 
-.PHONY: up down logs migrate test test-backend test-frontend lint fmt
+.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate
 
 up:
 	docker compose up --build -d
@@ -23,8 +23,13 @@ test-backend:
 test-frontend:
 	cd frontend && npx vitest --run
 
+# Run the CI gate against the local API: make gate GATE_PATH=path/to/project
+GATE_PATH ?= backend/tests/fixtures/software/simple_python_project
+gate:
+	python3 scripts/ci_gate.py "$(GATE_PATH)"
+
 lint:
-	cd backend && .venv/bin/ruff check . && .venv/bin/ruff format --check .
+	cd backend && .venv/bin/ruff check . ../ml/scripts ../scripts --config pyproject.toml && .venv/bin/ruff format --check . ../ml/scripts ../scripts --config pyproject.toml
 	cd frontend && npm run lint
 
 fmt:
