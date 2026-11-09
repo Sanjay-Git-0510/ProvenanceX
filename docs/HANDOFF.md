@@ -64,8 +64,14 @@ _Last updated: 2026-11-09_
   Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
   42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
   under "Phase 5 progress".
-- **Phase 6 (fusion, policy, SHAP, explanation API): complete.** Milestones A, B and C are committed.
-  `GET /scans/{id}/evidence` is built and awaiting commit. Details are under "Phase 6 progress".
+- **Phase 6 (fusion, policy, SHAP, explanation API): complete and committed**, including
+  `GET /api/v1/scans/{scan_id}/evidence`. Details are under "Phase 6 progress".
+  - **Last full run:** `pytest -m "not network and not sandbox"`, Python 3.14, Compose Postgres:
+    2034 passed, 0 failed, 0 skipped.
+  - **Not run:** the 42 network and sandbox tests, frontend tests, the suite on Python 3.12, the CI
+    workflow, and a scan with the sandbox enabled.
+  - The PostgreSQL tests need the `DATABASE_URL` documented under "Verified on this machine" above
+    (`postgresql+psycopg://provenancex:provenancex@127.0.0.1:5433/provenancex`). Without it they skip.
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -93,7 +99,7 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 (blockchain):** not started. Wait for the go-ahead.
+**Phase 7 (blockchain) is next.** Not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -117,6 +123,8 @@ Standing notes:
   distinct from a real 0 (for example an explicit `hasScore` flag). Choose the encoding in the Phase 7
   plan and test it, including through verification.
 - A `RiskDecision` row can have a null `risk_score` and a real decision. Handle that row explicitly.
+- Mock scans still report a `bom_sha256`, so check `mock.mock_stages` from `/evidence` before
+  anchoring.
 - `pending`, `scan_failed` and `risk_computation_error` have no `RiskDecision` row and nothing to
   anchor. Report them as NOT ANCHORED.
 
@@ -136,11 +144,11 @@ Standing notes:
 
 ## Phase 6 progress
 
-- **`GET /api/v1/scans/{id}/evidence`: complete, awaiting commit.**
+- **`GET /api/v1/scans/{id}/evidence`: complete and committed.**
   - New: `app/api/evidence_view.py`, `app/schemas/evidence.py`, `tests/api/test_scans_evidence.py`,
     and a Postgres test in `tests/integration/test_db_connection.py`. `app/schemas/risk.py` gained
     `no_result_training_label`. The README and `docs/architecture.md` are updated.
-  - Read-only: it never computes a risk result. Findings and components page separately, at most
+  - `/evidence` is read-only and never computes risk. Findings and components page separately, at most
     200 per page, default 50. Group counts cover all rows, not just the page.
   - **Allowlisted fields:** left out are finding `details`, component `properties`, provenance check
     `data`, stage error `details`, `error_details`, `ingest_metadata` and stage file names.
@@ -164,7 +172,7 @@ Standing notes:
     `volumes_from`, `devices`, `privileged`, `cap_add`, and `host` for `network_mode`, `pid` or `ipc`,
     with negative cases. It reads the base `docker-compose.yml` only.
 
-- **Milestone C (risk stage, parity, ML in the API image): complete, awaiting commit.**
+- **Milestone C (risk stage, parity, ML in the API image): complete and committed.**
   - New: `app/pipeline/risk_stage.py`, `tests/api/test_feature_parity.py`,
     `tests/unit/test_compose_settings.py`. The `risk` stage runs after the sandbox in both pipelines
     and never fails the scan. `GET /risk` still computes a result for older scans, or when the
