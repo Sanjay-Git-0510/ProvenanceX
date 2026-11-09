@@ -108,9 +108,10 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 8 Milestone 0 is committed (`f97d169`). Milestone A (frontend foundation) is done and waiting
-to be committed.** See "Phase 8 progress". Milestone B (Dashboard, New Scan, Scan Details, Findings,
-Risk Analysis) is next and is not started; waiting for the go-ahead.
+**Phase 8 Milestones 0 (`f97d169`) and A (`3a8d26f`) are committed. Milestone B (Dashboard, New Scan,
+Scan Details, Findings, Risk Analysis) is done and waiting for a browser check and commit.** See
+"Phase 8 progress". Milestone C (Dependency Graph, Model Lineage, Blockchain Evidence, CI/CD, Settings,
+responsive and accessibility pass) is next and is not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -155,7 +156,39 @@ Standing notes:
 
 ## Phase 8 progress
 
-- **Milestone A (frontend foundation): complete, not yet committed.**
+- **Milestone B (core pages): complete, not yet committed.**
+  - Real pages on the real API: Dashboard, New Scan, Scan Details, Findings, Risk Analysis. New hooks
+    `useScan`, `useScanSelection`, `useFindings`; `lib/policyDisplay.js`; `components/{scan,risk,findings}/`;
+    `styles/pages.css`; page tests plus `src/test/helpers.jsx`. No new npm package.
+  - **Added beyond the approved list:** `risk/DecisionDisplay.jsx` (the only importer of `DecisionBadge`, so
+    an ALLOW cannot appear without `AllowCaveat`), `scan/ScanCounts.jsx`, and a sanitized `/evidence` call on
+    Risk Analysis, because `/risk` has no artifact type and graph links need one.
+  - **ALLOW guard:** `expectEveryAllowHasCaveat` in `src/test/helpers.jsx` fails if a rendered ALLOW lacks its
+    confidence, not-evaluated layers or flip notice. Tests prove it fails on a bare badge. A source test
+    fails if anything but `DecisionDisplay` imports `DecisionBadge`.
+  - **The Dashboard ALLOW count** spans many scans, so its caveat gives their confidence range and says the
+    layers are listed on each scan. Each ALLOW table row fetches its real layers.
+  - **Threshold:** `ALLOW_MIN_CONFIDENCE` is compared by a test with `min_allow_confidence` in the backend policy.
+  - **Writes:** Scan Details sends GET requests only, to `/evidence`, `/risk` (after the scan finishes) and
+    `/findings`, and never calls `/verify` or `/anchor`. The only side effect is the existing behaviour that
+    `GET /risk` stores a result on first read for an older scan. The Dashboard calls `/risk` for ALLOW rows
+    only, which already have a stored decision, so listing computes nothing. Risk Analysis does the same
+    first-read computation when an older scan is chosen.
+  - **Not derived:** no LOW/MEDIUM/HIGH risk band, because the API gives only a confidence label.
+  - **Scan Details links** to `/graph`, `/lineage` and `/blockchain`, which stay placeholders until Milestone C.
+  - **Verified on this machine (2026-11-09), host Node 26:**
+    - `npm run lint`: clean. `npm run build`: succeeded; no CDN host in the build output
+    - `npm test -- --run`: 375 passed, 0 failed, 0 skipped (14 files)
+    - Breaking the code on purpose made tests fail in all 11 valid cases, including ALLOW without its caveat,
+      empty layers, `/risk` on every row, `/risk` while running, a POST to `/risk`, threshold drift, null score
+      as 0, a raw `details` blob, unsanitized text, hidden mock labels and polling while hidden
+    - Field names were compared with one real stored `/risk` and `/evidence` response from the running API.
+      That check caught the `sandbox` finding source and the name-ordered stages
+  - **Not run:** the pages in a real browser (the owner checks this before committing), a frontend image build,
+    frontend checks on Node 22 (the CI version), the CI workflow on GitHub, ruff and pytest (no backend file
+    changed).
+
+- **Milestone A (frontend foundation): complete and committed (`3a8d26f`).**
   - **Packages added (exact versions, nothing else):** `@fontsource-variable/onest` 5.3.1,
     `@fontsource/ibm-plex-mono` 5.3.0 (Latin 400 and 500 only), `lucide-react` 1.70.0.
   - New: `styles/{tokens,layout,components}.css`; `components/ui/` (`Button`, `Badge`, `DecisionBadge`,

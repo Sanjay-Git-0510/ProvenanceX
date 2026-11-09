@@ -52,3 +52,29 @@ export function shortenMiddle(value, start = 10, end = 8) {
   if (value.length <= start + end + 1) return value;
   return `${value.slice(0, start)}…${value.slice(-end)}`;
 }
+
+/** A feature value from the risk engine. Null means no evidence, so it never reads as 0 or false. */
+export function formatFeatureValue(value) {
+  if (value === null || value === undefined) return "No value";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+const SOURCE_HOSTS = new Set(["github.com", "huggingface.co"]);
+
+/** True only for an https URL on an allowlisted host. `host` narrows it to one of them. */
+export function isAllowedSourceUrl(value, host) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      SOURCE_HOSTS.has(url.hostname) &&
+      (!host || url.hostname === host)
+    );
+  } catch {
+    return false;
+  }
+}

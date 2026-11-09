@@ -22,7 +22,7 @@ export default function StatusBadge() {
       <Icon size={14} aria-hidden="true" />
       <span>
         {label}
-        {version ? <span className="hide-below-sm"> · v{version}</span> : null}
+        {version ? <span className="hide-below-sm chip__version"> · v{version}</span> : null}
       </span>
     </span>
   );

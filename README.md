@@ -11,7 +11,8 @@ takes a software repo or package, or an AI model artifact, and does the followin
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
 > ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. The dashboard
-> shell and base components exist, but its pages are still placeholders. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> has working Dashboard, New Scan, Scan Details, Findings and Risk Analysis pages. The Dependency Graph, Model Lineage,
+> Blockchain Evidence, CI/CD and Settings pages are still placeholders. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -59,6 +60,10 @@ The frontend is dark only. Its design tokens are in `frontend/src/styles/tokens.
 WCAG AA contrast for each colour on its actual background. Onest and IBM Plex Mono (Latin 400 and 500)
 are self-hosted through npm packages, so the app loads nothing from an external CDN. After changing
 frontend dependencies, rebuild the Compose image with `docker compose build frontend`.
+
+Opening an older completed scan in Scan Details or Risk Analysis calls `GET /risk`, which computes and stores
+its decision on first read. The Dashboard does not trigger this: it calls `/risk` only for ALLOW rows, which
+already have a stored decision.
 
 ## Tests and lint
 

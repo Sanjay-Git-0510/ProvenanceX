@@ -21,9 +21,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// Health calls answer with status; the list endpoint answers with an empty page.
+function emptyApi(url) {
+  if (url.includes("/scans")) {
+    return jsonResponse(200, { page: { total: 0, limit: 20, offset: 0, has_more: false }, items: [] });
+  }
+  return jsonResponse(200, { status: "ok", version: "0.1.0" });
+}
+
 describe("routing", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(() => jsonResponse(200, { status: "ok", version: "0.1.0" })));
+    vi.stubGlobal("fetch", vi.fn(emptyApi));
   });
 
   // Each test awaits the health badge so async state updates settle inside act().
@@ -51,7 +59,7 @@ describe("routing", () => {
 
 describe("health badge", () => {
   it("shows OK when API and DB are healthy", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => jsonResponse(200, { status: "ok", version: "0.1.0" })));
+    vi.stubGlobal("fetch", vi.fn(emptyApi));
     renderAt("/");
     expect(await screen.findByText(/API OK · DB OK/)).toBeInTheDocument();
   });
@@ -78,7 +86,7 @@ describe("health badge", () => {
 
 describe("application shell", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(() => jsonResponse(200, { status: "ok", version: "0.1.0" })));
+    vi.stubGlobal("fetch", vi.fn(emptyApi));
   });
 
   it("offers a skip link to the main region", async () => {
@@ -106,6 +114,7 @@ describe("application shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Menu" }));
     fireEvent.click(screen.getByRole("link", { name: "Findings" }));
     expect(screen.getByRole("heading", { level: 1, name: "Findings" })).toBeInTheDocument();
+    await screen.findByLabelText(/^Scan/);
     expect(screen.getByRole("navigation", { name: "Main" })).not.toHaveClass("rail--open");
   });
 
@@ -113,6 +122,12 @@ describe("application shell", () => {
     renderAt("/findings");
     await screen.findByText(/API OK/);
     expect(screen.getByRole("link", { name: "Findings" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows the version in lowercase text", async () => {
+    renderAt("/");
+    await screen.findByText(/API OK/);
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("v0.1.0");
   });
 
   it("gives every health state an icon as well as text", async () => {

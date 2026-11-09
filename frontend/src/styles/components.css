@@ -75,6 +75,10 @@
   text-transform: uppercase;
 }
 
+.chip__version {
+  text-transform: none;
+}
+
 button.chip:hover {
   border-color: var(--line-control);
   color: var(--text-primary);

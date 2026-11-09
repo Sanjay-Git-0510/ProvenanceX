@@ -144,7 +144,7 @@ describe("source rules", () => {
 
   it("applies the glass class only to the header and its controls", () => {
     const users = offenders(/className=[^>]*\bglass\b/).map((path) => path.split("/").pop());
-    expect(users.sort()).toEqual(["Layout.jsx", "StatusBadge.jsx"]);
+    expect(users.sort()).toEqual(["Layout.jsx", "ScanHero.jsx", "StatusBadge.jsx"]);
   });
 
   it("gives every glass rule a solid fallback", () => {
@@ -159,6 +159,13 @@ describe("source rules", () => {
     const main = files.find(({ path }) => path.endsWith("main.jsx")).text;
     const imports = [...main.matchAll(/@fontsource\/ibm-plex-mono\/([\w-]+\.css)/g)].map((m) => m[1]);
     expect(imports).toEqual(["latin-400.css", "latin-500.css"]);
+  });
+
+  it("keeps the version out of the chip's uppercase style", () => {
+    const css = files.find(({ path }) => path.endsWith("components.css")).text;
+    expect(css).toMatch(/\.chip__version \{\s*text-transform: none;/);
+    const badge = files.find(({ path }) => path.endsWith("StatusBadge.jsx")).text;
+    expect(badge).toContain("chip__version");
   });
 
   it("honours reduced motion", () => {

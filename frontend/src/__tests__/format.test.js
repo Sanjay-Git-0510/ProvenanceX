@@ -88,6 +88,10 @@ describe("evidence links", () => {
     expect(evidenceRoute(`${api}/graph`, { artifactType: "lora" })).toBe(`/lineage?scan=${id}`);
   });
 
+  it("leaves a graph link out when the artifact type is unknown", () => {
+    expect(evidenceRoute(`${api}/graph`)).toBeNull();
+  });
+
   it.each([
     null,
     "https://evil.test/api/v1/scans/x",

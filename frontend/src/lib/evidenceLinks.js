@@ -14,7 +14,7 @@ const LABELS = {
   graph: "Graph",
 };
 
-/** artifactType picks the graph page: software goes to Dependency Graph, models to Lineage. */
+/** artifactType picks the graph page. Without it a graph link is left out rather than guessed. */
 export function evidenceRoute(href, { artifactType } = {}) {
   if (typeof href !== "string") return null;
   const match = SCAN_LINK.exec(href);
@@ -30,6 +30,7 @@ export function evidenceRoute(href, { artifactType } = {}) {
     case "/findings":
       return category ? `/findings?${scan}&category=${category}` : `/findings?${scan}`;
     case "/graph":
+      if (!artifactType) return null;
       return `${SOFTWARE_TYPES.has(artifactType) ? "/graph" : "/lineage"}?${scan}`;
     case "/risk":
       return `/risk?${scan}`;
