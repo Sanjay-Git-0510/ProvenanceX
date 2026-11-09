@@ -122,6 +122,12 @@ class TrainingDataLabel(BaseModel):
     notice: str
 
 
+def no_result_training_label() -> TrainingDataLabel:
+    return TrainingDataLabel(
+        label="synthetic", models_used=False, notice=_NO_RESULT_TRAINING_NOTICE
+    )
+
+
 def _api(scan_id: UUID, suffix: str = "") -> str:
     return f"/api/v1/scans/{scan_id}{suffix}"
 
@@ -267,9 +273,7 @@ class RiskResponse(BaseModel):
             status=status,
             reason=StatusReason(code=code, message=message),
             scores=_empty_scores(message),
-            training_data=TrainingDataLabel(
-                label="synthetic", models_used=False, notice=_NO_RESULT_TRAINING_NOTICE
-            ),
+            training_data=no_result_training_label(),
             evidence_links=_all_evidence_links(scan.id),
         )
 

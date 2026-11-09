@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Uplo
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from app.api.evidence_view import PageRequest, build_evidence
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.db.database import get_sessionmaker
@@ -32,6 +33,7 @@ from app.pipeline.providers import ScanProviders, build_providers
 from app.pipeline.software import run_software_ingestion
 from app.pipeline.workspace import MB, create_workspace, remove_workspace, write_stream_limited
 from app.risk.service import risk_for_scan
+from app.schemas.evidence import DEFAULT_PAGE, MAX_PAGE, EvidenceResponse
 from app.schemas.findings import FindingOut, FindingsResponse, Severity
 from app.schemas.graph import GraphEdgeOut, GraphNodeOut, GraphResponse
 from app.schemas.risk import RiskResponse
@@ -382,3 +384,26 @@ def get_scan_risk(
     """The explainable risk result. risk_score is null, never 0, when it cannot be computed."""
     with session_factory() as session:
         return risk_for_scan(session, _get_scan_or_404(session, scan_id), settings)
+
+
+PageLimit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
+PageOffset = Annotated[int, Query(ge=0, le=2_147_483_647)]
+
+
+@router.get("/{scan_id}/evidence", response_model=EvidenceResponse)
+def get_scan_evidence(
+    scan_id: UUID,
+    session_factory: SessionFactoryDep,
+    findings_limit: PageLimit = DEFAULT_PAGE,
+    findings_offset: PageOffset = 0,
+    components_limit: PageLimit = DEFAULT_PAGE,
+    components_offset: PageOffset = 0,
+) -> EvidenceResponse:
+    """A bounded, sanitized evidence summary. Holds no file contents, raw SBOMs or traces."""
+    with session_factory() as session:
+        return build_evidence(
+            session,
+            _get_scan_or_404(session, scan_id),
+            PageRequest(findings_limit, findings_offset),
+            PageRequest(components_limit, components_offset),
+        )

@@ -83,6 +83,7 @@ Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run
 | GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, per-stage evidence status (`stages`), `bom_sha256`, `provenance`, component and finding counts, and a structured error if the scan failed |
 | GET | `/api/v1/scans/{scan_id}/findings` | Findings, highest CVSS first. Filters: `category`, `severity`, `source`, `limit`, `offset`. Each item has a separate `cvss` object, `source` and `is_mock`. |
 | GET | `/api/v1/scans/{scan_id}/graph` | Dependency or model-lineage graph (`graph_kind`), nodes and edges, graph features, `limitations`, and `is_mock` |
+| GET | `/api/v1/scans/{scan_id}/evidence` | Bounded, sanitized evidence summary: stage statuses and reasons, feature vector with null reasons, finding and component summaries with sources, provenance record, hashes, model version, mock flags and the synthetic-training label. Pages with `findings_limit`/`findings_offset` and `components_limit`/`components_offset` (at most 200 per page). Contains no file contents, raw SBOMs or traces |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
 

@@ -188,3 +188,50 @@ def test_risk_endpoint_on_postgres_returns_null_not_zero(engine, tmp_path):
     assert first["status"] == "not_computed"
     assert first["risk_score"] is None
     assert first == second
+
+
+def test_evidence_endpoint_on_postgres(engine, tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from app.api.scans import get_session_factory
+    from app.db.models import (
+        Artifact,
+        ArtifactSource,
+        ArtifactType,
+        Finding,
+        FindingCategory,
+        Scan,
+        ScanStatus,
+    )
+    from app.main import create_app
+
+    command.upgrade(Config("alembic.ini"), "head")
+    with Session(engine) as session:
+        artifact = Artifact(
+            artifact_type=ArtifactType.SOFTWARE, name="t", source=ArtifactSource.UPLOAD
+        )
+        scan = Scan(artifact=artifact, status=ScanStatus.COMPLETED, scanner_version="t", stages={})
+        finding = Finding(
+            scan=scan,
+            category=FindingCategory.STATIC,
+            identifier="PX-1",
+            severity="LOW",
+            source="provenancex",
+        )
+        session.add_all([artifact, scan, finding])
+        session.commit()
+        artifact_id, scan_id = artifact.id, scan.id
+    app = create_app()
+    app.dependency_overrides[get_session_factory] = lambda: sessionmaker(bind=engine)
+    client = TestClient(app)
+    try:
+        response = client.get(f"/api/v1/scans/{scan_id}/evidence")
+    finally:
+        _delete_artifact(engine, artifact_id)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["findings"]["by_category"] == {"static": 1}
+    assert body["feature_vector"]["reason"]["code"] == "no_risk_decision"

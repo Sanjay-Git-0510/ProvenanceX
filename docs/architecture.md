@@ -337,6 +337,18 @@ confidence and the layers not evaluated, so a default scan with the sandbox off 
 in that form. Hard rules set a minimum decision and do not alter the score. `hash_changed` from a
 new commit is normal and is not a hard failure; `hash_consistency` and `download_integrity` are.
 
+**What an ALLOW does not mean.** An ALLOW can occur without vulnerability or behavioral evidence.
+The behavioral layer is never required, and the sandbox is off by default. The vulnerability layer
+is not required for AI artifacts, and it is skipped when a repository pins no dependencies. The UI
+must show the "not evaluated" layers (`not_evaluated_layers` from `/risk`) beside every ALLOW.
+
+**Decisions can flip between scans.** Confidence depends on how much evidence was available, so a
+decision can change between scans of unchanged content when confidence crosses the ALLOW minimum
+(currently 0.60). Observed on `hf-internal-testing/tiny-random-gpt2`: the first scan was REVIEW at
+confidence 0.594, and a rescan was ALLOW at 0.606 only because `config_changed` could then be
+compared with a prior scan. Compare the stored confidence and evaluated layers before reading a
+flip as a change in the artifact.
+
 **Deliberate trade-off: ML alone cannot change the decision.** The decision band comes from the
 rule-only score, and the fused score is limited to that band. High ML output cannot raise the
 decision, and low ML output cannot lower it, for any weights. The cost is that a threat only the

@@ -64,9 +64,8 @@ _Last updated: 2026-11-09_
   Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
   42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
   under "Phase 5 progress".
-- **Phase 6 (fusion, policy, SHAP, explanation API): Milestones A, B and C are done.** A and B are
-  committed; C is awaiting commit. `GET /scans/{id}/evidence`, which the implementation plan and
-  CLAUDE.md list, is **not built**. Details are under "Phase 6 progress".
+- **Phase 6 (fusion, policy, SHAP, explanation API): complete.** Milestones A, B and C are committed.
+  `GET /scans/{id}/evidence` is built and awaiting commit. Details are under "Phase 6 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -94,7 +93,7 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-Wait for the go-ahead. Decide first whether `GET /scans/{id}/evidence` is built before Phase 7.
+**Phase 7 (blockchain):** not started. Wait for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -127,10 +126,43 @@ Standing notes:
 - `decision` is independent of the score: show a null score beside REVIEW or BLOCK when both occur.
   `decision` is null while pending or failed, so show no ALLOW/REVIEW/BLOCK badge then.
 - Null applies to each value in `scores` too, and each has its own `reason`.
+- An ALLOW can occur without vulnerability or behavioral evidence. Show the "not evaluated" layers
+  (`not_evaluated_layers`) beside every ALLOW.
+- A decision can flip between scans of unchanged content when confidence crosses the ALLOW minimum
+  (currently 0.60). Show the confidence and the evaluated layers so a flip is not read as a change in
+  the artifact. See "Decisions can flip between scans" in `docs/architecture.md`.
 - Factors with `evaluated=false` describe missing evidence and must look different from measured
   factors. Show `training_data.notice` wherever ML output appears, and label `contains_mock_evidence`.
 
 ## Phase 6 progress
+
+- **`GET /api/v1/scans/{id}/evidence`: complete, awaiting commit.**
+  - New: `app/api/evidence_view.py`, `app/schemas/evidence.py`, `tests/api/test_scans_evidence.py`,
+    and a Postgres test in `tests/integration/test_db_connection.py`. `app/schemas/risk.py` gained
+    `no_result_training_label`. The README and `docs/architecture.md` are updated.
+  - Read-only: it never computes a risk result. Findings and components page separately, at most
+    200 per page, default 50. Group counts cover all rows, not just the page.
+  - **Allowlisted fields:** left out are finding `details`, component `properties`, provenance check
+    `data`, stage error `details`, `error_details`, `ingest_metadata` and stage file names.
+  - **Sanitizer:** every string then passes through `sanitize`, which redacts host paths and
+    secret-like values and cuts strings at 1024 characters. `sanitized` reports the counts, so a
+    redacted name or title is visible as such. It is pattern-based: it reduces leakage from
+    artifact-derived text and cannot recognize every possible secret.
+  - No weight or threshold changed.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean. `alembic check`: no drift (no migration was needed)
+    - `pytest -m "not network and not sandbox"`, including Postgres, on Python 3.14: 2034 passed,
+      0 failed, 0 skipped, 42 deselected
+    - Removing the redaction patterns at runtime made 13 tests fail, including the leak test
+    - Rebuilt Compose API (Python 3.12), on stored real scans at the maximum page size: Flask 55,667
+      bytes (60 findings, 117 components), Hugging Face 12,129 bytes (4 findings, 0 components). Both
+      had 44 features, the model version and the synthetic label, with 0 redactions and no host path.
+      An unknown scan returned 404.
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected), frontend tests, the
+    pytest suite on Python 3.12, the CI workflow on GitHub, and a scan with the sandbox enabled.
+  - **Hardening test (added after Milestone C):** the no-docker-socket test also rejects `tmpfs`,
+    `volumes_from`, `devices`, `privileged`, `cap_add`, and `host` for `network_mode`, `pid` or `ipc`,
+    with negative cases. It reads the base `docker-compose.yml` only.
 
 - **Milestone C (risk stage, parity, ML in the API image): complete, awaiting commit.**
   - New: `app/pipeline/risk_stage.py`, `tests/api/test_feature_parity.py`,
