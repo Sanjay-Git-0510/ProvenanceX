@@ -8,13 +8,8 @@ import yaml
 from app.core.config import Settings
 
 ROOT = Path(__file__).resolve().parents[3]
-# app_name is a constant. The blockchain settings arrive with Phase 7.
-NOT_PASSED = {
-    "APP_NAME",
-    "BLOCKCHAIN_RPC_URL",
-    "BLOCKCHAIN_CONTRACT_ADDRESS",
-    "BLOCKCHAIN_PRIVATE_KEY",
-}
+# app_name is a constant.
+NOT_PASSED = {"APP_NAME"}
 SETTINGS = {name.upper() for name in Settings.model_fields}
 
 
@@ -42,6 +37,14 @@ def test_models_are_mounted_read_only_at_the_configured_path():
     service = _api_service()
     assert "./ml/models:/app/ml/models:ro" in service["volumes"]
     assert service["environment"]["MODEL_PATH"] == "/app/ml/models"
+
+
+def test_api_uses_the_compose_chain_and_keeps_anchoring_off():
+    environment = _api_service()["environment"]
+    assert environment["BLOCKCHAIN_RPC_URL"] == "http://hardhat:8545"
+    assert environment["BLOCKCHAIN_PROVIDER"] == "${BLOCKCHAIN_PROVIDER:-disabled}"
+    assert environment["BLOCKCHAIN_ANCHOR_ON_SCAN"] == "${BLOCKCHAIN_ANCHOR_ON_SCAN:-false}"
+    assert environment["BLOCKCHAIN_PRIVATE_KEY"] == "${BLOCKCHAIN_PRIVATE_KEY:-}"
 
 
 def test_api_container_gets_no_docker_socket():

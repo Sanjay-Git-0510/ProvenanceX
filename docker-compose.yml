@@ -121,6 +121,13 @@ services:
       SANDBOX_SPIKE_CPU_MIN_INTERVALS: ${SANDBOX_SPIKE_CPU_MIN_INTERVALS:-3}
       # Fixed path inside the container: the host's ml/models, mounted read-only.
       MODEL_PATH: /app/ml/models
+      BLOCKCHAIN_PROVIDER: ${BLOCKCHAIN_PROVIDER:-disabled}
+      BLOCKCHAIN_ANCHOR_ON_SCAN: ${BLOCKCHAIN_ANCHOR_ON_SCAN:-false}
+      BLOCKCHAIN_TIMEOUT_SECONDS: ${BLOCKCHAIN_TIMEOUT_SECONDS:-30}
+      # Fixed: "localhost" from a copied .env would point at the API container itself.
+      BLOCKCHAIN_RPC_URL: http://hardhat:8545
+      BLOCKCHAIN_CONTRACT_ADDRESS: ${BLOCKCHAIN_CONTRACT_ADDRESS:-}
+      BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:-}
     volumes:
       - ./ml/models:/app/ml/models:ro
     ports:

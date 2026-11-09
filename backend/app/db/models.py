@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -67,6 +69,12 @@ class RiskVerdict(StrEnum):
     ALLOW = "ALLOW"
     REVIEW = "REVIEW"
     BLOCK = "BLOCK"
+
+
+class AnchorStatus(StrEnum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
 
 
 def _enum(enum_cls: type[StrEnum], name: str) -> Enum:
@@ -143,6 +151,9 @@ class Scan(Base):
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
     risk_decision: Mapped["RiskDecision | None"] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    blockchain_evidence: Mapped["BlockchainEvidence | None"] = relationship(
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -314,3 +325,52 @@ class RiskDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     scan: Mapped[Scan] = relationship(back_populates="risk_decision")
+
+
+class BlockchainEvidence(Base):
+    """What was anchored for one scan, and where (pipeline step 19).
+
+    risk_score_scaled is NULL when no score was computed; it is never stored as 0 in that case.
+    A NULL bom_hash or provenance_hash means that evidence was absent. Only a `confirmed` row
+    means an anchor exists. Mock rows have source="mock" and no chain fields.
+    """
+
+    __tablename__ = "blockchain_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "risk_score_scaled IS NULL "
+            "OR (risk_score_scaled >= 0 AND risk_score_scaled <= 1000000)",
+            name="ck_blockchain_evidence_score_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    artifact_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    artifact_hash: Mapped[str] = mapped_column(String(64))
+    bom_hash: Mapped[str | None] = mapped_column(String(64))
+    provenance_hash: Mapped[str | None] = mapped_column(String(64))
+    risk_score_scaled: Mapped[int | None] = mapped_column(Integer)
+    decision: Mapped[RiskVerdict] = mapped_column(_enum(RiskVerdict, "anchored_verdict"))
+    scanner_version: Mapped[str] = mapped_column(String(32))
+    # UTC seconds of the stored decision: the anchored timestamp, not the block time.
+    evidence_timestamp: Mapped[int] = mapped_column(BigInteger)
+    # Deterministic hash of the eight fields (app/blockchain/encoding.py). Off-chain only.
+    record_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[AnchorStatus] = mapped_column(_enum(AnchorStatus, "anchor_status"))
+    # Provider that handled the anchor: "web3" or "mock".
+    source: Mapped[str] = mapped_column(String(16))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    tx_hash: Mapped[str | None] = mapped_column(String(128))
+    block_number: Mapped[int | None] = mapped_column(BigInteger)
+    block_hash: Mapped[str | None] = mapped_column(String(66))
+    anchor_index: Mapped[int | None] = mapped_column(Integer)
+    chain_id: Mapped[int | None] = mapped_column(BigInteger)
+    contract_address: Mapped[str | None] = mapped_column(String(42))
+    anchored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    scan: Mapped[Scan] = relationship(back_populates="blockchain_evidence")

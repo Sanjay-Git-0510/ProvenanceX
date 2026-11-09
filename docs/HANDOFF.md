@@ -99,10 +99,10 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 Milestone A (contract and Hardhat) is done and waiting to be committed.** Milestones B
-(web3.py adapter, anchoring) and C (verification API, pipeline wiring) are not started. See "Phase 7
-progress". The approved Compose `workspace` named volume and its hardening-test change belong to
-Milestone C.
+**Phase 7 Milestone A (contract and Hardhat) is committed (`a11e58a`). Milestone B (web3.py adapter,
+anchoring) is done and waiting to be committed.** Milestone C (verification API, pipeline wiring) is
+not started. See "Phase 7 progress". The approved Compose `workspace` named volume and its
+hardening-test change belong to Milestone C.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -147,8 +147,50 @@ Standing notes:
 
 ## Phase 7 progress
 
-- **Milestone A (contract and Hardhat): complete, not yet committed.** Nothing in `backend/app` uses
-  the chain yet.
+- **Milestone B (web3.py adapter and anchoring): complete, not yet committed.** The service layer
+  only: no endpoint or pipeline step calls `anchor_scan` until Milestone C, and
+  `BLOCKCHAIN_ANCHOR_ON_SCAN` has no effect yet.
+  - New: `app/blockchain/{base,encoding,web3_provider,mock,anchoring}.py`, `abi.json`,
+    `app/schemas/blockchain.py`, migration `0006` (`blockchain_evidence`), `contracts/scripts/check-abi.js`,
+    four `tests/unit/test_blockchain_*.py` files, `tests/integration/test_chain_live.py` (marker `chain`,
+    `PROVENANCEX_CHAIN_TESTS=1`). Pin: `web3==8.0.0`. Settings: `BLOCKCHAIN_PROVIDER` (default
+    `disabled`), `BLOCKCHAIN_ANCHOR_ON_SCAN` (default `false`), `BLOCKCHAIN_TIMEOUT_SECONDS`.
+  - **Record:** hashes, status, version and mock flags come from `build_evidence`. Score, decision and
+    timestamp come from the stored `RiskDecision`, because `/evidence` has neither score nor decision.
+    The timestamp is `RiskDecision.created_at` in UTC seconds, not the block time.
+  - **Record hash:** `provenancex-anchor-v1`, SHA-256 of canonical JSON of the eight encoded values.
+    Off-chain only. Golden vectors in the tests were computed with `sha256sum`.
+  - **Refusals (nothing is sent):** unfinished scan, no decision, missing artifact hash, any hash failing
+    `^[0-9a-f]{64}$` (also all zeros, a trailing newline, or a sanitizer redaction marker), mock evidence
+    on the real chain (`contains_mock_evidence`, which covers stages, findings, components and
+    provenance), provider disabled, non-local RPC, chain id other than 31337, no contract code, a key that
+    is not the anchorer.
+  - **Send sequence:** a `pending` row is committed first, then an existing on-chain anchor is adopted if
+    identical, otherwise one is sent and all eight fields are read back before `confirmed`. A failed send
+    becomes `failed` and can be retried. A `pending` row older than 3 x `BLOCKCHAIN_TIMEOUT_SECONDS` counts
+    as abandoned. A scan can be anchored only once.
+  - **Mock chain:** `source="mock"`, `mock-tx-...` ids, block fields null, process-wide ledger lost on
+    exit. It may hold mock evidence, labeled. Selected only by `BLOCKCHAIN_PROVIDER=mock`.
+  - **Added within the approved scope:** columns `error_code` and `reserved_at`, an `anchor_invalid_record`
+    error for a bad score, version, timestamp or id, a 256-anchor read limit, and an HTTP session that ignores
+    proxy variables and does not follow redirects.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean
+    - `alembic upgrade head`, `downgrade 0005` (table removed), `upgrade head`, `alembic check`: OK, no drift
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres: 2236 passed, 0 failed,
+      0 skipped, 55 deselected, on Python 3.14 and on Python 3.12.16 (disposable API-image container)
+    - `pytest -m chain` against the Compose chain and Postgres, freshly deployed contract: 13 passed, 0 failed,
+      0 skipped, on Python 3.14 and 3.12.16. The node's test key was held only in a shell variable.
+    - `npx hardhat test`: 32 passing. `check-abi.js`: match (17 entries); a modified ABI exited 1
+    - `docker compose build hardhat api` and `up --wait api`: healthy, `web3` 8.0.0 in the image, `alembic
+      current` = `0006 (head)`, provider `disabled`, on-scan `false`, RPC `http://hardhat:8545`
+  - **Not run:** `pytest -m network` and `pytest -m sandbox` (the other 42 deselected; no code they cover
+    changed), frontend tests (frontend unchanged), the CI workflow on GitHub.
+  - **Limitation:** one web3 process lock serializes sends, so several API workers sharing one key could
+    collide on a nonce. Such a send fails and is recorded as `failed`, then can be retried.
+
+- **Milestone A (contract and Hardhat): complete and committed (`a11e58a`).** At that point nothing
+  in `backend/app` used the chain.
   - New: `contracts/` Hardhat project (`contracts/ProvenanceEvidence.sol`, `test/`, `scripts/deploy.js`,
     `hardhat.config.js`, `package.json`, `package-lock.json`, `Dockerfile`, `.dockerignore`),
     `backend/tests/unit/test_compose_chain.py`, Compose services `hardhat` and `hardhat-deploy`

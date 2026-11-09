@@ -3,6 +3,7 @@ import os
 import stat
 import zipfile
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,15 @@ from app.core.config import Settings, get_settings
 from app.db import models  # noqa: F401  (registers tables on Base.metadata)
 from app.db.base import Base
 from app.db.database import get_db
+from app.db.models import (
+    Artifact,
+    ArtifactSource,
+    ArtifactType,
+    ProvenanceRecord,
+    RiskDecision,
+    Scan,
+    ScanStatus,
+)
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,12 +42,16 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "sandbox: runs the real Docker sandbox (set PROVENANCEX_SANDBOX_TESTS=1)"
     )
+    config.addinivalue_line(
+        "markers", "chain: needs the local Hardhat chain (set PROVENANCEX_CHAIN_TESTS=1)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
     gates = (
         ("network", "PROVENANCEX_NETWORK_TESTS"),
         ("sandbox", "PROVENANCEX_SANDBOX_TESTS"),
+        ("chain", "PROVENANCEX_CHAIN_TESTS"),
     )
     for marker, variable in gates:
         if os.environ.get(variable) == "1":
@@ -157,3 +171,65 @@ def special_info(name: str, file_type: int) -> zipfile.ZipInfo:
 
 def symlink_info(name: str) -> zipfile.ZipInfo:
     return special_info(name, stat.S_IFLNK)
+
+
+# --------------------------------------------------------------------------- blockchain (Phase 7)
+def make_anchorable_scan(
+    session,
+    *,
+    status="completed",
+    score=0.7,
+    decision="REVIEW",
+    artifact_sha256="a" * 64,
+    bom_sha256="b" * 64,
+    provenance_sha256="c" * 64,
+    with_decision=True,
+    stages=None,
+    scanner_version="0.1.0",
+):
+    """Store a scan with the rows anchoring reads. A None hash leaves that evidence absent."""
+    artifact = Artifact(
+        artifact_type=ArtifactType.SOFTWARE,
+        name="fixture",
+        source=ArtifactSource.UPLOAD,
+        sha256=artifact_sha256,
+    )
+    scan = Scan(
+        artifact=artifact,
+        status=ScanStatus(status),
+        scanner_version=scanner_version,
+        stages=stages or {},
+        bom_sha256=bom_sha256,
+    )
+    session.add_all([artifact, scan])
+    if provenance_sha256 is not None:
+        session.add(
+            ProvenanceRecord(
+                scan=scan,
+                source_known=True,
+                revision_pinned=False,
+                signature_files_present=False,
+                provenance_present=False,
+                checks=[],
+                record_sha256=provenance_sha256,
+                source="provenancex",
+            )
+        )
+    if with_decision:
+        session.add(
+            RiskDecision(
+                scan=scan,
+                risk_score=score,
+                decision=decision,
+                decision_basis="test",
+                confidence=0.5,
+                confidence_label="MEDIUM",
+                ml_status="unavailable",
+                policy_version="test",
+                layer_scores={},
+                explanation={},
+                created_at=datetime(2026, 11, 9, 12, 0, 30, 750000, tzinfo=UTC),
+            )
+        )
+    session.commit()
+    return scan.id

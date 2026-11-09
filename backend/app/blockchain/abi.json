@@ -1,0 +1,322 @@
+[
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes16",
+        "name": "artifactId",
+        "type": "bytes16"
+      },
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "AnchorIndexOutOfRange",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidDecision",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "riskScore",
+        "type": "uint32"
+      }
+    ],
+    "name": "InvalidRiskScore",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidScannerVersion",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "NotAnchorer",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroArtifactHash",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroArtifactId",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroTimestamp",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes16",
+        "name": "artifactId",
+        "type": "bytes16"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "anchorIndex",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "artifactHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "bomHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "provenanceHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "riskScore",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum ProvenanceEvidence.Decision",
+        "name": "decision",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "scannerVersion",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "EvidenceAnchored",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_SCANNER_VERSION_BYTES",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "NO_SCORE",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "SCORE_SCALE",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes16",
+        "name": "artifactId",
+        "type": "bytes16"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "artifactHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "bomHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "provenanceHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "riskScore",
+        "type": "uint32"
+      },
+      {
+        "internalType": "enum ProvenanceEvidence.Decision",
+        "name": "decision",
+        "type": "uint8"
+      },
+      {
+        "internalType": "string",
+        "name": "scannerVersion",
+        "type": "string"
+      },
+      {
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "anchor",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "anchorIndex",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes16",
+        "name": "artifactId",
+        "type": "bytes16"
+      }
+    ],
+    "name": "anchorCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "anchorer",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes16",
+        "name": "artifactId",
+        "type": "bytes16"
+      },
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "getAnchor",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bytes16",
+            "name": "artifactId",
+            "type": "bytes16"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "artifactHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "bomHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "provenanceHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "riskScore",
+            "type": "uint32"
+          },
+          {
+            "internalType": "enum ProvenanceEvidence.Decision",
+            "name": "decision",
+            "type": "uint8"
+          },
+          {
+            "internalType": "string",
+            "name": "scannerVersion",
+            "type": "string"
+          },
+          {
+            "internalType": "uint64",
+            "name": "timestamp",
+            "type": "uint64"
+          }
+        ],
+        "internalType": "struct ProvenanceEvidence.Anchor",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

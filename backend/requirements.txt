@@ -12,3 +12,5 @@ networkx>=3.4,<4
 httpx>=0.27,<1
 # Phase 3: model-card front matter (SafeLoader only)
 pyyaml>=6.0.2,<7
+# Phase 7: local chain client
+web3==8.0.0

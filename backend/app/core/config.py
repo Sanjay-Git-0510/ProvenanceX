@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     sandbox_spike_cpu_min_intervals: int = Field(default=3, gt=0)
     model_path: Path = Path("./ml/models")
 
+    # --- Blockchain (Phase 7). "disabled" is the default. "mock" is an in-memory ledger tagged
+    # source="mock", and is never a fallback. "web3" accepts only a local chain.
+    blockchain_provider: Literal["disabled", "web3", "mock"] = "disabled"
+    blockchain_anchor_on_scan: bool = False
+    blockchain_timeout_seconds: float = Field(default=30.0, gt=0)
     blockchain_rpc_url: str = "http://localhost:8545"
     blockchain_contract_address: str = ""
     blockchain_private_key: str = Field(default="", repr=False)

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from app.blockchain.base import ChainProvider
+from app.blockchain.mock import MockChainProvider
 from app.core.config import Settings
 from app.pipeline.workspace import MB
 from app.scanners.hf.base import HfProvider
@@ -36,6 +38,7 @@ class ScanProviders:
     nvd: NvdEnricher | None
     hf: HfProvider | None = None
     sandbox: SandboxProvider | None = None  # None: SANDBOX_PROVIDER=disabled
+    chain: ChainProvider | None = None  # None: BLOCKCHAIN_PROVIDER=disabled
 
 
 def _client_factory(
@@ -73,6 +76,27 @@ def _sandbox(settings: Settings) -> SandboxProvider | None:
             max_stderr_bytes=settings.sandbox_max_stderr_kb * 1024,
             max_concurrent=settings.sandbox_max_concurrent,
             queue_timeout_seconds=settings.sandbox_queue_timeout_seconds,
+        )
+    return None
+
+
+# One ledger per process, so that anchors outlive a single request.
+_mock_chain = MockChainProvider()
+
+
+def build_chain_provider(settings: Settings) -> ChainProvider | None:
+    """Configuration is checked when the chain is used, so it can never break a scan."""
+    if settings.blockchain_provider == "mock":
+        return _mock_chain
+    if settings.blockchain_provider == "web3":
+        # Imported here so that web3 loads only when the real chain is selected.
+        from app.blockchain.web3_provider import Web3ChainProvider
+
+        return Web3ChainProvider(
+            settings.blockchain_rpc_url,
+            settings.blockchain_contract_address,
+            settings.blockchain_private_key,
+            settings.blockchain_timeout_seconds,
         )
     return None
 
@@ -116,4 +140,11 @@ def build_providers(
             user_agent=f"ProvenanceX/{settings.scanner_version} (supply-chain scanner)",
             transport=transport,
         )
-    return ScanProviders(sbom=sbom, vulns=vulns, nvd=nvd, hf=hf, sandbox=_sandbox(settings))
+    return ScanProviders(
+        sbom=sbom,
+        vulns=vulns,
+        nvd=nvd,
+        hf=hf,
+        sandbox=_sandbox(settings),
+        chain=build_chain_provider(settings),
+    )

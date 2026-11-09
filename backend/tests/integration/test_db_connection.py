@@ -44,7 +44,7 @@ def test_alembic_upgrade_head(engine):
     head = ScriptDirectory.from_config(cfg).get_current_head()
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert head == "0005"  # bump when a new migration is added
+    assert head == "0006"  # bump when a new migration is added
     assert version == head
 
 
@@ -235,3 +235,87 @@ def test_evidence_endpoint_on_postgres(engine, tmp_path):
     body = response.json()
     assert body["findings"]["by_category"] == {"static": 1}
     assert body["feature_vector"]["reason"]["code"] == "no_risk_decision"
+
+
+def _insert_anchor_row(engine, score):
+    """Store a scan and one row in blockchain_evidence. Returns the three ids."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy.orm import Session
+
+    from app.db.models import AnchorStatus, BlockchainEvidence, Scan, utcnow
+    from tests.conftest import make_anchorable_scan
+
+    command.upgrade(Config("alembic.ini"), "head")
+    with Session(engine) as session:
+        scan_id = make_anchorable_scan(session)
+        artifact_id = session.get(Scan, scan_id).artifact_id
+        try:
+            row = _anchor_row(BlockchainEvidence, AnchorStatus, utcnow, scan_id, artifact_id, score)
+            session.add(row)
+            session.commit()
+            return artifact_id, row.id, scan_id
+        except Exception:
+            session.rollback()
+            _delete_artifact(engine, artifact_id)
+            raise
+
+
+def _anchor_row(model, status, now, scan_id, artifact_id, score):
+    return model(
+        scan_id=scan_id,
+        artifact_id=artifact_id,
+        artifact_hash="a" * 64,
+        risk_score_scaled=score,
+        decision="REVIEW",
+        scanner_version="0.1.0",
+        evidence_timestamp=1_790_000_000,
+        record_hash="d" * 64,
+        status=status.PENDING,
+        source="web3",
+        reserved_at=now(),
+    )
+
+
+@pytest.mark.parametrize("score", [None, 0])
+def test_blockchain_evidence_keeps_null_and_zero_distinct(engine, score):
+    artifact_id, row_id, _ = _insert_anchor_row(engine, score)
+    try:
+        with engine.connect() as conn:
+            stored = conn.execute(
+                text("SELECT risk_score_scaled FROM blockchain_evidence WHERE id = :id"),
+                {"id": row_id},
+            ).scalar()
+        assert stored == score
+    finally:
+        _delete_artifact(engine, artifact_id)
+    with engine.connect() as conn:
+        left = conn.execute(
+            text("SELECT count(*) FROM blockchain_evidence WHERE id = :id"), {"id": row_id}
+        ).scalar()
+    assert left == 0  # cascades with the scan
+
+
+def test_blockchain_evidence_rejects_out_of_range_score(engine):
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError, match="ck_blockchain_evidence_score_range"):
+        _insert_anchor_row(engine, 1_000_001)
+
+
+def test_blockchain_evidence_allows_one_row_per_scan(engine):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+
+    from app.db.models import AnchorStatus, BlockchainEvidence, utcnow
+
+    artifact_id, _, scan_id = _insert_anchor_row(engine, None)
+    try:
+        with Session(engine) as session:
+            session.add(
+                _anchor_row(BlockchainEvidence, AnchorStatus, utcnow, scan_id, artifact_id, 1)
+            )
+            with pytest.raises(IntegrityError, match="ix_blockchain_evidence_scan_id"):
+                session.commit()
+    finally:
+        _delete_artifact(engine, artifact_id)
