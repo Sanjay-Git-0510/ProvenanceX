@@ -108,9 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 8 is complete and committed. Phase 9 Milestone A (CI gate) is committed (`14f35d1`). Milestone B
-(end-to-end fixtures) is done and waiting for the owner's commit.** See "Phase 9 progress". Milestone C (demo and
-docs) is not started; waiting for the go-ahead.
+**Phases 0 to 8 and Phase 9 Milestones A (`14f35d1`) and B (`2ac0fa5`) are committed. Phase 9 Milestone C (demo and
+docs) is done and waiting for the owner's commit.** That completes every planned phase. See "Phase 9 progress" and the
+"Still not run" list in `README.md`. No new phase has been started.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -155,7 +155,52 @@ Standing notes:
 
 ## Phase 9 progress
 
-- **Milestone B (end-to-end fixtures): complete, not yet committed.**
+- **Milestone C (demo and docs): complete, not yet committed.**
+  - New: `docker-compose.demo.yml` (port overrides only), `scripts/demo.sh`, `scripts/seed_demo.py`,
+    `backend/tests/unit/test_seed_demo.py`, `docs/security/npm-audit-triage.md`, `make demo`, `make demo-down`.
+    Changed: the stale `.env.example` comment, `README.md`. No application code, dependency or workflow changed.
+  - **Demo:** Compose project `provenancex-demo`, UI 15173, API 18080, Postgres 15435, Hardhat 18546. It exits 3 with
+    `DEMO NOT RUN` if a port is busy or OSV is unreachable, and needs internet access. `make demo-down` removes only that
+    project. Docker images built for the demo stay until removed by hand.
+  - **Seed:** a fixed list of the four committed Milestone B fixtures, plus one BLOCK case generated at run time in a
+    temporary directory (`GLOBAL`, `STOP`, no call), never committed or loaded. No decision is assumed.
+  - **Test key:** in a shell variable in the script, and in the API container's environment until `make demo-down`,
+    because anchoring needs it. Never printed or stored in a file by the script.
+  - **npm audit:** report only. The two critical advisories are in test tooling (`tinypool`, through `vitest`). Both moderate
+    `react-router` advisories are in the browser bundle. One does not apply (Declarative Mode). The other looks
+    unreachable from reading the code. Unverified items are listed in the report.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean. `alembic check`: no drift
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres, Python 3.14: 2616 passed, 0 failed,
+      0 skipped, 78 deselected
+    - `npm run lint`: clean. `npm test -- --run`: 483 passed, 0 failed, 0 skipped. `npm run build`: succeeded; no CDN host
+      or test tooling in the build output
+    - `npx hardhat test` in the Compose image: 32 passing. `check-abi.js`: match (17 entries)
+    - **`make demo`, real images including the first frontend image build:** exit 0 in about 68 seconds, with cached
+      backend layers. API ready, UI 200 on 15173, API proxy through the UI OK, no key in the output.
+      Refusals: OSV unreachable exit 3, second start while running exit 3 with the demo left running.
+      `ci_gate.py` against the demo API: exit 0 (REVIEW).
+    - Demo results. **Wiring checks on synthetic fixtures, not detection results.** All anchored (`web3`, not mock),
+      and `POST /verify` returned `VERIFIED` for all five:
+
+      | Case | Decision | Score | Confidence | Not evaluated |
+      |---|---|---|---|---|
+      | `software_clean` | REVIEW | 0.478 | 0.630 | behavioral |
+      | `software_risky_config` | REVIEW | 0.529 | 0.630 | behavioral |
+      | `model_clean` | REVIEW | 0.350 | 0.488 | vulnerability, behavioral |
+      | `model_risky_config` | REVIEW | 0.495 | 0.488 | vulnerability, behavioral |
+      | `model_dangerous_global` | BLOCK | 0.721 | 0.488 | vulnerability, behavioral |
+
+    - `make demo-down`: 0 demo containers, volumes or networks left. The owner's stack was identical before and after:
+      both containers (ID, start time, restart count), both volumes, 15 scans, 15 artifacts, the latest scan time, API health
+    - Breaking the code on purpose made tests fail in all 21 cases, after one gap was closed: the port test only checked
+      that the numbers appeared in the script, so it was rewritten to check the loop
+  - **Not run:** the items in "Still not run" in `README.md`, including the new gate workflow on GitHub, CI for this
+    commit, and a fresh-clone reproduction on a clean machine. The `make demo` run used this checkout with the local
+    models, so a fresh clone would report "ML model unavailable". `make e2e` was not repeated, because no code it covers
+    changed.
+
+- **Milestone B (end-to-end fixtures): complete and committed (`2ac0fa5`).**
   - New: `backend/tests/fixtures/e2e/` (`software_clean`, `software_risky_config`, `model_clean`,
     `model_risky_config`, `README.md`; text only), `backend/tests/e2e/test_full_pipeline.py`,
     `backend/tests/security/test_e2e_fixtures.py`, `scripts/run_e2e.sh`, `make e2e`. No application code changed.

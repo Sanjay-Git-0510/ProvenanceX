@@ -7,7 +7,7 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 9, CI gate and end-to-end.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 9 complete (CI gate, end-to-end test, demo).** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
 > ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. All ten
@@ -23,9 +23,11 @@ The development machine is Windows with WSL2 Ubuntu. Keep the repo on the Linux 
 | Tool | Version | Notes |
 |---|---|---|
 | Docker Desktop | recent | Turn on **Settings → Resources → WSL Integration** for your distro so `docker` works inside WSL |
-| Python | 3.12 recommended | Containers use 3.12. Local 3.14 works for Phase 0. |
+| Python | 3.12 recommended | Containers and CI use 3.12. The suite has also been run locally on 3.14. |
 | Node.js | 22 LTS or newer | For the frontend |
 | Git | any | |
+| Docker Compose | tested with v5.7.0 | The demo override uses the `!override` tag, so an old Compose may reject it. |
+| Internet access | required | `make demo`, `make e2e`, GitHub and Hugging Face scans, and live OSV lookups all need it. |
 | Syft | 1.57.0 (pinned) | SBOM generation. Already in the API Docker image. For local runs, install it on `PATH` ([releases](https://github.com/anchore/syft/releases)). If it is missing, the SBOM stage reports `unavailable`. It never falls back to mock data silently. Set `SBOM_PROVIDER=mock` to choose the labeled mock explicitly. |
 
 ## Quickstart (Docker)
@@ -35,10 +37,48 @@ cp .env.example .env          # then edit POSTGRES_PASSWORD and DATABASE_URL
 docker compose up --build -d
 curl http://localhost:8000/api/v1/health/ready
 # {"status":"ready","db":"ok","version":"0.1.0"}
-open http://localhost:5173    # UI shell; the header badge shows API and DB status
+open http://localhost:5173    # the dashboard; the header badge shows API and DB status
 ```
 
 The API container runs `alembic upgrade head` on startup.
+
+## Demo (one command)
+
+```bash
+make demo        # builds, starts, deploys the contract and seeds benign fixtures
+make demo-down   # removes the demo containers and volumes, and nothing else
+```
+
+The demo is a separate Compose project, `provenancex-demo`, on its own ports, so it can run beside a development stack and
+never touches its data. It **needs internet access**: if OSV cannot be reached, or a demo port is busy, it stops with
+exit 3 and `DEMO NOT RUN`. After it starts, open <http://localhost:15173>.
+
+It seeds the four committed fixtures in `backend/tests/fixtures/e2e/` and one BLOCK case generated at run time in a
+temporary directory: a few pickle opcode bytes holding a global reference and `STOP`, with no call, which are only
+parsed and never loaded or committed. Each scan is anchored on the demo's local chain. The script prints the real
+decisions. They are wiring checks on synthetic fixtures, not detection results, and the clean fixtures come back REVIEW.
+
+Trained models are git-ignored. Without them the demo reports "ML model unavailable" and uses the rule-based score.
+
+## Ports
+
+Everything is bound to 127.0.0.1.
+
+| Service | Development stack | Demo | `make e2e` |
+|---|---|---|---|
+| UI | 5173 | 15173 | not started |
+| API | 8000 | 18080 | a free port |
+| Postgres | `POSTGRES_HOST_PORT` (5432) | 15435 | 15434 |
+| Hardhat | `BLOCKCHAIN_HOST_PORT` (8545) | 18546 | 18545 |
+
+## The `.env` file
+
+`cp .env.example .env`, then edit it. It is git-ignored: never commit it. Every setting has a comment in `.env.example`.
+
+- Set `POSTGRES_PASSWORD`, and use the same password in `DATABASE_URL`.
+- If a Windows PostgreSQL service holds 5432, set `POSTGRES_HOST_PORT=5433` and use that port in `DATABASE_URL`.
+- Blockchain settings are off by default. `BLOCKCHAIN_PRIVATE_KEY` must only ever be a public local Hardhat test key.
+- `make demo` and `make e2e` do not read secrets from `.env`. Their shell values override it, for that run only.
 
 ## Local development (without Docker)
 
@@ -66,21 +106,59 @@ already have a stored decision.
 
 ## Tests and lint
 
+Run these from the repository root unless a command changes directory. CI runs the first three groups.
+
 ```bash
-make lint            # ruff (backend) + eslint (frontend)
-make test            # pytest + vitest
-cd frontend && npm run build
+# Backend: the CI ruff commands
+cd backend
+.venv/bin/ruff check . ../ml/scripts ../scripts --config pyproject.toml
+.venv/bin/ruff format --check . ../ml/scripts ../scripts --config pyproject.toml
+
+# Backend tests, including Postgres (start it with: docker compose up -d --wait postgres)
+export DATABASE_URL=postgresql+psycopg://provenancex:<password>@127.0.0.1:5432/provenancex
+.venv/bin/alembic upgrade head && .venv/bin/alembic check
+MODEL_PATH=../ml/models .venv/bin/pytest -m "not network and not sandbox and not chain"
+cd ..
+
+# Frontend
+cd frontend && npm ci && npm run lint && npm test -- --run && npm run build && cd ..
+
+# Contracts, in the pinned Node 22 image
+docker compose build hardhat
+docker compose run --rm --no-deps hardhat npx hardhat test --no-compile
 ```
 
-Backend integration tests (`-m integration`) need a reachable PostgreSQL at `DATABASE_URL`.
-Without one they are **skipped with an explicit reason**. The real-Syft tests
-(`tests/integration/test_syft_real.py`) are skipped when Syft is not on `PATH`. In CI, Postgres
-and a pinned Syft are both available, and any skip fails the build.
+Without `DATABASE_URL`, integration tests are **skipped with an explicit reason**, and real-Syft tests skip when Syft is
+not on `PATH`. In CI, Postgres and a pinned Syft are available, and any skip fails the build.
 
-Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run only with
-`PROVENANCEX_NETWORK_TESTS=1`. Tests that run the real sandbox (marker `sandbox`) run only with
-`PROVENANCEX_SANDBOX_TESTS=1` and need the sandbox image. CI deselects both with
-`-m "not network and not sandbox"`.
+### Suites that do not run in CI
+
+CI deselects these markers. Each one also needs its environment flag, or it skips.
+
+| Suite | Needs | Command, from `backend/` |
+|---|---|---|
+| `network` (GitHub, OSV, NVD, Hugging Face) | Internet | `PROVENANCEX_NETWORK_TESTS=1 .venv/bin/pytest -m network` |
+| `sandbox` (real containers) | Docker, and the image from `docker build -t provenancex-sandbox:0.1.0 docker/sandbox` | `PROVENANCEX_SANDBOX_TESTS=1 .venv/bin/pytest -m sandbox` |
+| `chain` | Running Hardhat with the contract deployed, Postgres, and `DATABASE_URL`, `BLOCKCHAIN_RPC_URL`, `BLOCKCHAIN_CONTRACT_ADDRESS`, `BLOCKCHAIN_PRIVATE_KEY` | `PROVENANCEX_CHAIN_TESTS=1 .venv/bin/pytest -m chain` |
+| End-to-end | Docker, Syft, `backend/.venv`, internet | `make e2e` from the repository root (see below) |
+
+The sandbox tests cannot run in CI, because they need real containers with the full hardening flags. The end-to-end
+tests carry both the `chain` and `network` markers, so the `-m chain` and `-m network` runs skip them unless both
+flags are set.
+
+## Training the models
+
+Trained models and data are git-ignored, so a fresh clone has none and scoring is rule-based. Training data is
+**synthetic**: the models make no claim about detecting real malware. `backend/requirements-dev.txt` already installs
+the ML packages.
+
+```bash
+backend/.venv/bin/python ml/scripts/generate_dataset.py --families 200 --seed 42
+backend/.venv/bin/python ml/scripts/train_models.py --seed 42
+backend/.venv/bin/python ml/scripts/evaluate_models.py          # writes ml/reports/evaluation_report.*
+```
+
+Saved models must be loaded with the library versions in their manifest. Compose mounts `ml/models` read-only.
 
 ## API
 
@@ -306,6 +384,37 @@ python3 scripts/ci_gate.py path/to/model --kind model --fail-on-review
 Exit 2 also fails the job. It deliberately extends "fails only on BLOCK", so a missing result can never pass.
 Trained models are git-ignored, so on a CI runner the score is rule-based and the summary says "ML model unavailable".
 A pass is not a statement that an artifact is safe: read the not-evaluated layers and the confidence in the summary.
+
+## Known limitations
+
+**What the results mean**
+- Results from the fixtures, the demo and `make e2e` are **wiring checks on synthetic data, not detection measurements**.
+- The clean fixtures return **REVIEW, with layers not evaluated**: `behavioral` for software (the sandbox is off), and
+  `vulnerability` and `behavioral` for models. A not-evaluated layer is missing evidence, not a clean result.
+- All ML training data is synthetic. No `malicious_known_bad` records exist, so there is no malware-detection claim.
+- Weights, thresholds and hard rules are hand-set research parameters. They are not tuned, validated or standards.
+
+**Scope**
+- A pass from the gate is not a statement that an artifact is safe.
+- The `hash_consistency_failed` BLOCK needs a source URL, so it cannot fire through an upload. It has unit tests only.
+- The demo's frontend image runs the Vite dev server. There is no production frontend image.
+- The sandbox needs the API on the host. Do not run real malware through it. See "Optional Docker sandbox".
+- The local chain runs in memory, so a restart erases its anchors.
+- 5 frontend npm advisories are open and unfixed: see [docs/security/npm-audit-triage.md](docs/security/npm-audit-triage.md).
+  The `contracts/` tooling has separate, untriaged advisories.
+- More limits are listed in [docs/architecture.md](docs/architecture.md) and [docs/HANDOFF.md](docs/HANDOFF.md).
+
+**Still not run**
+- The gate workflow on GitHub. It triggers only on a pull request or by hand.
+- CI on GitHub for the final Phase 9 commit, until it is pushed.
+- A fresh-clone reproduction of this README on a clean machine.
+- `pytest -m network`, `sandbox` and `chain` as full suites since their last recorded runs in Phase 7. The end-to-end
+  test covers part of the network and chain paths.
+- A complete scan with the sandbox enabled through the Compose stack. It cannot work there by design.
+- A recorded check of the final CI/CD page and of responsive layout in a real browser. The tests use jsdom, which has no
+  layout.
+- A live `hash_consistency_failed` BLOCK, and a wrong chain ID on a real chain.
+- Any evaluation on real malware or real-world labelled artifacts.
 
 ## Safety
 

@@ -1,7 +1,7 @@
 # Thin wrappers around common commands. Run from the repo root.
 PY := backend/.venv/bin
 
-.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate e2e
+.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
 
 up:
 	docker compose up --build -d
@@ -31,6 +31,14 @@ gate:
 # Local only: disposable Postgres and Hardhat, real Syft, live OSV. Exit 3 means NOT RUN.
 e2e:
 	scripts/run_e2e.sh
+
+# A separate Compose project on its own ports, beside any development stack. Exit 3 means NOT RUN.
+demo:
+	scripts/demo.sh
+
+# Removes only the demo project and its volumes.
+demo-down:
+	docker compose -p provenancex-demo --project-directory . -f docker-compose.yml -f docker-compose.demo.yml --profile chain-deploy down -v --remove-orphans
 
 lint:
 	cd backend && .venv/bin/ruff check . ../ml/scripts ../scripts --config pyproject.toml && .venv/bin/ruff format --check . ../ml/scripts ../scripts --config pyproject.toml

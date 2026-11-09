@@ -1,0 +1,15 @@
+# Used only by scripts/demo.sh, on top of docker-compose.yml, under the project name
+# provenancex-demo. It moves the published ports so the demo can run beside a development stack.
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:15435:5432"
+  hardhat:
+    ports: !override
+      - "127.0.0.1:18546:8545"
+  api:
+    ports: !override
+      - "127.0.0.1:18080:8000"
+  frontend:
+    ports: !override
+      - "127.0.0.1:15173:5173"
