@@ -108,9 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 Milestones A (`a11e58a`) and B (`21a89f7`) are committed. Milestone C (verification API,
-pipeline wiring) is done and waiting to be committed**, which completes Phase 7. See "Phase 7
-progress". Phase 8 (dashboard) is next and is not started; waiting for the go-ahead.
+**Phase 7 is complete and committed (`e28d7b9`). Phase 8 Milestone 0 (`GET /api/v1/scans`) is done
+and waiting to be committed.** See "Phase 8 progress". Milestone A (frontend foundation) is next
+and is not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -152,6 +152,35 @@ Standing notes:
   the artifact. See "Decisions can flip between scans" in `docs/architecture.md`.
 - Factors with `evaluated=false` describe missing evidence and must look different from measured
   factors. Show `training_data.notice` wherever ML output appears, and label `contains_mock_evidence`.
+
+## Phase 8 progress
+
+- **Milestone 0 (`GET /api/v1/scans`): complete, not yet committed.** Read-only and paginated, newest
+  first (`created_at`, then `id`). `limit` defaults to 20, maximum 100; optional `offset` and `status`.
+  - New: `app/schemas/scan_list.py`, `tests/api/test_scans_list.py`. Changed: `app/api/scans.py`, one
+    Postgres test in `tests/integration/test_db_connection.py`.
+  - The query selects only the returned columns, so ingest metadata, error details, stages and
+    `source_url` are never read. Every string passes through the `/evidence` `sanitize`.
+  - It reads stored `RiskDecision` rows only. `decision`, `risk_score` and `confidence` are null when no
+    row exists, including an older completed scan that `/risk` has not computed yet. `GET /risk` is what
+    computes such a result, and the list does not call it.
+  - No migration, and no weight, threshold or other backend logic changed. `created_at` has no index,
+    which is acceptable at MVP scan counts.
+  - **Owner decisions (2026-11-09), also in `CLAUDE.md`:** dark theme only; glass on the header, controls,
+    Scan Details hero and modal backdrop only; no Anchor button. The "truncated" note in
+    `docs/design/lumora-reference.md` was wrong and is corrected.
+  - **Milestone A installs, exact versions only:** `@fontsource-variable/onest` 5.3.1,
+    `@fontsource/ibm-plex-mono` 5.3.0, `lucide-react` 1.70.0. Milestone C: `@dagrejs/dagre` 3.1.3 and
+    `jest-axe` (dev). No external CDNs. Show what `npm install` adds.
+  - **Verified on this machine (2026-11-09), Python 3.14, Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean. `alembic check`: no drift
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres: 2422 passed, 0 failed,
+      0 skipped, 72 deselected
+    - Breaking the code on purpose made tests fail: no sanitizer (9), null score as 0 (5), oldest first
+      (2), an extra selected column (`test_sensitive_columns_are_not_queried`). The code was then restored
+  - **Not run:** `pytest -m network`, `sandbox` and `chain` (the 72 deselected; no code they cover changed),
+    Python 3.12, frontend checks (frontend unchanged), the CI workflow on GitHub, and the endpoint through
+    the Compose API (the running image predates it; rebuild with `docker compose build api`).
 
 ## Phase 7 progress
 

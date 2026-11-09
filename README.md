@@ -81,6 +81,7 @@ Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run
 | GET | `/api/v1/health/ready` | Readiness (DB check). Returns 503 with `{"error": {...}}` when the DB is down. |
 | POST | `/api/v1/scans/software` | Start a software scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
 | POST | `/api/v1/scans/model` | Start an AI/ML scan (multipart form, see below). Returns **202** `{scan_id, artifact_id, status}`. |
+| GET | `/api/v1/scans` | Scans, newest first. Query: `limit` (default 20, max 100), `offset`, `status` (`queued`, `running`, `completed`, `failed`). Each sanitized item has `scan_id`, `status`, `created_at`, `finished_at`, `artifact` (`name`, `artifact_type`, `source`), `decision`, `risk_score` and `confidence`. The last three are null when no decision is stored, never 0. Reads stored results only |
 | GET | `/api/v1/scans/{scan_id}` | Scan status, normalized artifact record, ingest evidence, per-stage evidence status (`stages`), `bom_sha256`, `provenance`, component and finding counts, and a structured error if the scan failed |
 | GET | `/api/v1/scans/{scan_id}/findings` | Findings, highest CVSS first. Filters: `category`, `severity`, `source`, `limit`, `offset`. Each item has a separate `cvss` object, `source` and `is_mock`. |
 | GET | `/api/v1/scans/{scan_id}/graph` | Dependency or model-lineage graph (`graph_kind`), nodes and edges, graph features, `limitations`, and `is_mock` |

@@ -24,6 +24,7 @@ from app.db.models import (
     FindingCategory,
     GraphEdge,
     GraphNode,
+    RiskDecision,
     Scan,
     ScanStatus,
 )
@@ -33,10 +34,17 @@ from app.pipeline.providers import ScanProviders, build_providers
 from app.pipeline.software import run_software_ingestion
 from app.pipeline.workspace import MB, create_workspace, remove_workspace, write_stream_limited
 from app.risk.service import risk_for_scan
-from app.schemas.evidence import DEFAULT_PAGE, MAX_PAGE, EvidenceResponse
+from app.schemas.evidence import DEFAULT_PAGE, MAX_PAGE, EvidenceResponse, Page, Sanitized, sanitize
 from app.schemas.findings import FindingOut, FindingsResponse, Severity
 from app.schemas.graph import GraphEdgeOut, GraphNodeOut, GraphResponse
 from app.schemas.risk import RiskResponse
+from app.schemas.scan_list import (
+    DEFAULT_SCAN_PAGE,
+    MAX_SCAN_PAGE,
+    ScanListArtifact,
+    ScanListItem,
+    ScanListResponse,
+)
 from app.schemas.scans import ScanCreatedResponse, ScanResponse
 from app.security.revision import validate_revision
 from app.security.url_validation import validate_github_repo_url, validate_hf_repo_url
@@ -407,3 +415,54 @@ def get_scan_evidence(
             PageRequest(findings_limit, findings_offset),
             PageRequest(components_limit, components_offset),
         )
+
+
+@router.get("", response_model=ScanListResponse)
+def list_scans(
+    session_factory: SessionFactoryDep,
+    status: ScanStatus | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_SCAN_PAGE)] = DEFAULT_SCAN_PAGE,
+    offset: PageOffset = 0,
+) -> ScanListResponse:
+    """Scans, newest first. Reads stored decisions only, so it never computes a risk result."""
+    conditions = [Scan.status == status] if status is not None else []
+    with session_factory() as session:
+        total = session.scalar(select(func.count()).select_from(Scan).where(*conditions)) or 0
+        # Selecting named columns keeps ingest metadata and error details out of memory too.
+        rows = session.execute(
+            select(
+                Scan.id,
+                Scan.status,
+                Scan.created_at,
+                Scan.finished_at,
+                Artifact.name,
+                Artifact.artifact_type,
+                Artifact.source,
+                RiskDecision.decision,
+                RiskDecision.risk_score,
+                RiskDecision.confidence,
+            )
+            .join(Artifact, Scan.artifact_id == Artifact.id)
+            .outerjoin(RiskDecision, RiskDecision.scan_id == Scan.id)
+            .where(*conditions)
+            .order_by(Scan.created_at.desc(), Scan.id.desc())
+            .limit(limit)
+            .offset(offset)
+        ).all()
+    response = ScanListResponse(
+        page=Page(total=total, limit=limit, offset=offset, has_more=offset + len(rows) < total),
+        items=[
+            ScanListItem(
+                scan_id=row[0],
+                status=row[1],
+                created_at=row[2],
+                finished_at=row[3],
+                artifact=ScanListArtifact(name=row[4], artifact_type=row[5], source=row[6]),
+                decision=row[7],
+                risk_score=row[8],
+                confidence=row[9],
+            )
+            for row in rows
+        ],
+    )
+    return ScanListResponse.model_validate(sanitize(response.model_dump(mode="json"), Sanitized()))

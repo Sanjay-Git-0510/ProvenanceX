@@ -370,12 +370,13 @@ Load these from the public bucket (NOT relative paths):
 - **Copy / labels (verbatim):** brand "Lumora"; loader tagline "Bold ideas, shipped with quiet precision."; status bar "Local time" / time / date; nav Home/Work/Services/Studio/Careers/Contact; hero eyebrow "Independent Studio", watermark "LUMORA", heading "Bold ideas," / "shipped with" / "quiet precision", rating "200+ brands shipped", CTAs "Let's Talk" / "View Work", card items + partners + hero footer ("Working since 2014" / "Remote-first, worldwide" / "Scroll to explore") as listed; About all copy as listed; CreateBand We/Build/→/Better; Portfolio "Portfolio" / "Selected Work" + 4 items; Services "Services" / "What we do best" + 4 rows; Stats "By the numbers" / "Proof in the work, not the words." + 4 stats; Footer CTA "Have a project in mind? Let's get to work." + "Start a project", tagline, 3 link columns, legal "© 2025 Lumora Studio. All rights reserved." + Privacy/Terms; modal "Start a project" / "Tell us what you're building." / fields / "We reply within one business day." / "Send request" / success "Request received" / "Thanks for reaching out — we'll get back to you within one business day."
 ---
 NOTE (added by the project owner, not part of the original prompt):
-The text above is cut off in the middle of the hero's right column
-(HeroCard). These sections are NOT included: HeroCard details, partner
-grid, About, CreateBand, Portfolio, Services, Stats, Footer, NavMenu,
-RequestModal. For ProvenanceX, use only what is present above: the
-palette and tokens, Onest typeface, rem/spacing scale, radii, hairline
-borders, frosted header/control chips, the hero vignette gradient, pill
-buttons and the accent color. Where this reference is silent, extend it
-in the same style: near-white surfaces, near-black ink panels (#0a0a0a),
-one burnt-orange accent (#b15f2c).
+Corrected 2026-11-09: an earlier version of this note said the text above
+was cut off mid-hero. It is not. Every section through the RequestModal,
+the component recipes and the fixed parameters are present.
+For ProvenanceX, take the structure from this reference: Onest typeface,
+rem/spacing scale, radii, hairline borders, frosted header/control chips,
+pill buttons and component shapes. Do not rebuild the landing page.
+The owner's Phase 8 decisions in CLAUDE.md override this reference where
+they differ: dark theme with the palette remapped, no gradients, a fixed
+16px root, AA-contrast text colours, 150-250 ms motion and an 8px grid.
+Where this reference is silent, extend it in the same style.

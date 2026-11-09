@@ -190,6 +190,39 @@ def test_risk_endpoint_on_postgres_returns_null_not_zero(engine, tmp_path):
     assert first == second
 
 
+def test_scan_list_on_postgres_keeps_null_score_null(engine):
+    from alembic import command
+    from alembic.config import Config
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+
+    from app.api.scans import get_session_factory
+    from app.main import create_app
+
+    command.upgrade(Config("alembic.ini"), "head")
+    artifact_id, decision_id = _insert_risk(engine, None)
+    with engine.connect() as conn:
+        scan_id = conn.execute(
+            text("SELECT scan_id FROM risk_decisions WHERE id = :id"), {"id": decision_id}
+        ).scalar()
+    app = create_app()
+    app.dependency_overrides[get_session_factory] = lambda: sessionmaker(bind=engine)
+    try:
+        response = TestClient(app).get("/api/v1/scans", params={"limit": 100})
+        bad_page = TestClient(app).get("/api/v1/scans", params={"limit": 101})
+    finally:
+        _delete_artifact(engine, artifact_id)
+    assert response.status_code == 200, response.text
+    assert bad_page.status_code == 422
+    assert bad_page.json()["error"]["code"] == "validation_error"
+    body = response.json()
+    assert body["page"]["total"] >= 1
+    item = next(i for i in body["items"] if i["scan_id"] == str(scan_id))
+    assert item["risk_score"] is None
+    assert item["decision"] == "REVIEW"
+    assert item["confidence"] == 0.0
+
+
 def test_evidence_endpoint_on_postgres(engine, tmp_path):
     from alembic import command
     from alembic.config import Config
