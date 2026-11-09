@@ -108,9 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 8 is complete and committed (latest: Milestone C, `a17a016`). Phase 9 Milestone A (CI gate) is done and
-waiting for the owner's commit and first GitHub run.** See "Phase 9 progress". Milestones B (end-to-end fixtures)
-and C (demo and docs) are not started; waiting for the go-ahead.
+**Phase 8 is complete and committed. Phase 9 Milestone A (CI gate) is committed (`14f35d1`). Milestone B
+(end-to-end fixtures) is done and waiting for the owner's commit.** See "Phase 9 progress". Milestone C (demo and
+docs) is not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -155,7 +155,59 @@ Standing notes:
 
 ## Phase 9 progress
 
-- **Milestone A (CI gate): complete, not yet committed.**
+- **Milestone B (end-to-end fixtures): complete, not yet committed.**
+  - New: `backend/tests/fixtures/e2e/` (`software_clean`, `software_risky_config`, `model_clean`,
+    `model_risky_config`, `README.md`; text only), `backend/tests/e2e/test_full_pipeline.py`,
+    `backend/tests/security/test_e2e_fixtures.py`, `scripts/run_e2e.sh`, `make e2e`. No application code changed.
+  - **How to run:** `make e2e`. Exit 0 passed, 1 failed, 3 **NOT RUN**. Local only: CI deselects `chain` and `network`.
+  - **The test:** starts the real API with uvicorn in a subprocess and uses real HTTP, Postgres, Syft, live OSV
+    (`NVD_ENABLED=false`) and Hardhat. Asserts only what a rule guarantees. Clean artifacts have no assumed decision.
+    Risky configs assert the named hard rule fired and the decision is not ALLOW. Tampering edits a workspace file
+    after anchoring and expects `MISMATCH` (`evidence_mismatch`, with `artifact_hash` and `record_hash`), then
+    `VERIFIED` once restored. The dangerous global is opcode bytes (`GLOBAL os.system`, `STOP`, no call) written to a
+    temporary directory at run time, never committed and only parsed. The gate runs as a subprocess and must exit 1.
+  - **Outages never pass:** the script checks OSV first, and if OSV fails mid-run the software tests skip. The script
+    turns any skip into exit 3.
+  - **Disposable stack:** Compose project `provenancex-e2e`, Postgres on 15434, Hardhat on 18545, removed on exit.
+  - **Test key:** read from the chain's logs into a shell variable and exported only to child processes. The script
+    never prints or stores it. The Hardhat node itself prints its public test keys to its container log, which is
+    deleted with the project.
+  - **Added beyond the plan:** the `require_live_osv` skip and exit 3 for skips, to enforce "not run" on an outage, and
+    a check that the runner does not use a relative Compose path.
+  - **Bug found and fixed during the run:** the cleanup used a relative Compose path after the script changed into
+    `backend/`, and `|| true` hid the failure, so the first run left its containers behind. They were removed. The
+    path is now absolute, a failed cleanup prints a warning, and a test guards it.
+  - **`hash_consistency_failed` stays unit-tested only,** because it cannot fire through an upload without changing
+    scanner logic.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean. `alembic check`: no drift
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres, Python 3.14: 2581 passed,
+      0 failed, 0 skipped, 78 deselected
+    - `npm run lint`: clean. `npm test -- --run`: 483 passed, 0 failed, 0 skipped. `npm run build`: succeeded; no CDN
+      host in the build output
+    - `npx hardhat test` in the Compose image: 32 passing. `check-abi.js`: match (17 entries)
+    - `scripts/run_e2e.sh`, live OSV reachable: exit 0, 6 passed, 0 failed, 0 skipped, on two runs with identical
+      observed results; no test key in the output; nothing left behind after the fixed run
+    - Observed results. **These are wiring checks on benign fixtures, not detection results:**
+
+      | Case | Decision | Risk score | Confidence | Hard rules fired | Not evaluated |
+      |---|---|---|---|---|---|
+      | `software_clean` | REVIEW | 0.478 | 0.630 | none | behavioral |
+      | `model_clean` | REVIEW | 0.350 | 0.488 | none | vulnerability, behavioral |
+      | `software_risky_config` | REVIEW | 0.529 | 0.630 | `install_hook_present` | behavioral |
+      | `model_risky_config` | REVIEW | 0.495 | 0.488 | `install_hook_present`, `custom_model_code` | vulnerability, behavioral |
+      | `model_dangerous_global` | BLOCK | 0.721 | 0.488 | `dangerous_pickle_globals` | vulnerability, behavioral |
+
+      The gate exited 1 on the live BLOCK. Both clean scans anchored on the local chain, returned `VERIFIED`, then
+      `MISMATCH` after the edit, then `VERIFIED` once restored.
+    - Failure paths: OSV unreachable at the preflight exit 3; OSV unreachable mid-run (4 passed, 2 skipped) exit 3;
+      a harmless pickle in place of the global, 2 failed, exit 1
+  - **Not run:** the end-to-end test in CI (local only, by decision); `pytest -m network` and `sandbox` beyond the
+    end-to-end test; `pytest -m chain` beyond it; the suite on Python 3.12; frontend checks on Node 22 locally; the pages
+    in a browser (frontend unchanged). The new gate workflow has not run on GitHub, because it triggers only on
+    `pull_request` or by hand. The Milestone A push ran `CI` successfully (run 42622338682).
+
+- **Milestone A (CI gate): complete and committed (`14f35d1`).**
   - New: `scripts/ci_gate.py` (standard library only), `.github/workflows/provenancex-gate.yml`,
     `backend/tests/unit/test_ci_gate.py`, `backend/tests/unit/test_gate_workflow.py`. Changed: `ci.yml` and the
     Makefile (ruff covers `scripts/`; new `make gate`), `pages/CiCd.jsx` and its test, `CLAUDE.md`, `README.md`.

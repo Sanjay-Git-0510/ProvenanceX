@@ -264,6 +264,27 @@ gone, including any made before this volume existed, report `UNKNOWN`.
 The full steps and the on-chain encoding are in [contracts/README.md](contracts/README.md). Use only
 Hardhat's public test keys, and never a real key.
 
+## End-to-end test
+
+```bash
+make e2e    # or scripts/run_e2e.sh
+```
+
+It needs Docker, Syft on `PATH`, `backend/.venv` and internet access for OSV. It starts a disposable Postgres (port
+15434) and Hardhat chain (port 18545) as Compose project `provenancex-e2e`, and removes them afterwards, so your own
+stack and data are untouched. It runs the real API over HTTP on the fixtures in `backend/tests/fixtures/e2e/`: scan,
+risk, anchoring, verification, tampering (`MISMATCH`) and a live BLOCK through the gate.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every test passed |
+| 1 | A test failed |
+| 3 | **NOT RUN**: a prerequisite or OSV was unavailable, or a test was skipped |
+
+The test stays out of CI because it depends on live OSV. It prints the decisions it observed, which are wiring checks
+on benign fixtures and not detection results. Fixtures are text only. The BLOCK case writes a few pickle opcode bytes to
+a temporary directory at run time, and they are only parsed.
+
 ## CI gate
 
 `scripts/ci_gate.py` submits a directory to the API, waits for the scan, reads the real decision and writes a job

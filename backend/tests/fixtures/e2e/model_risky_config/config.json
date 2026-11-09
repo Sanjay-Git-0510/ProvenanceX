@@ -1,0 +1,9 @@
+{
+  "model_type": "custom",
+  "architectures": ["CustomModel"],
+  "auto_map": {
+    "AutoConfig": "configuration_custom.CustomConfig",
+    "AutoModel": "modeling_custom.CustomModel"
+  },
+  "transformers_version": "4.40.0"
+}

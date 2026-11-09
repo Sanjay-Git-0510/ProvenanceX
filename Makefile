@@ -1,7 +1,7 @@
 # Thin wrappers around common commands. Run from the repo root.
 PY := backend/.venv/bin
 
-.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate
+.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate e2e
 
 up:
 	docker compose up --build -d
@@ -27,6 +27,10 @@ test-frontend:
 GATE_PATH ?= backend/tests/fixtures/software/simple_python_project
 gate:
 	python3 scripts/ci_gate.py "$(GATE_PATH)"
+
+# Local only: disposable Postgres and Hardhat, real Syft, live OSV. Exit 3 means NOT RUN.
+e2e:
+	scripts/run_e2e.sh
 
 lint:
 	cd backend && .venv/bin/ruff check . ../ml/scripts ../scripts --config pyproject.toml && .venv/bin/ruff format --check . ../ml/scripts ../scripts --config pyproject.toml

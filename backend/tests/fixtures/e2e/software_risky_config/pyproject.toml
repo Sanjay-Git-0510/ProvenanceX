@@ -1,0 +1,4 @@
+[project]
+name = "e2e-software-risky-config"
+version = "0.1.0"
+dependencies = ["idna==3.10"]

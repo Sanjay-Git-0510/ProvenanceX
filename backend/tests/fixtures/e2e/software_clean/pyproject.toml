@@ -1,0 +1,4 @@
+[project]
+name = "e2e-software-clean"
+version = "0.1.0"
+dependencies = ["idna==3.10"]

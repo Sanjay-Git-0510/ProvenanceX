@@ -1,0 +1,6 @@
+{
+  "model_type": "bert",
+  "architectures": ["BertModel"],
+  "hidden_size": 8,
+  "transformers_version": "4.40.0"
+}
