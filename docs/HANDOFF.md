@@ -60,8 +60,10 @@ _Last updated: 2026-11-08_
   committed.** Milestones A, B and C plus the post-review hardening are done. Final results:
   `pytest -m "not network and not sandbox"` 1477 passed, 0 skipped;
   `PROVENANCEX_SANDBOX_TESTS=1 pytest -m sandbox` 35 passed. Details are under "Phase 4 progress".
-- **Phase 5 (dataset, models, evaluation): in progress.** Milestones A and B are committed. Milestone C is complete and awaiting commit.
-  Details are under "Phase 5 progress".
+- **Phase 5 (dataset, models, evaluation): complete and committed.** Milestones A, B and C are done.
+  Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
+  42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
+  under "Phase 5 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -99,7 +101,7 @@ Notes for Phase 6:
 
 ## Phase 5 progress
 
-- **Milestone C (evaluation): complete, awaiting commit.**
+- **Milestone C (evaluation): complete and committed.**
   - New: `app/ml/evaluation.py`, `baselines.py`, `ablation.py`, `reporting.py`,
     `ml/scripts/evaluate_models.py`, and the generated `ml/reports/evaluation_report.{md,json}`.
     Every number in those reports is written by the script from a real run; see them for results.
