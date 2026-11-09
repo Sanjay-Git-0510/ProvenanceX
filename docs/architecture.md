@@ -71,7 +71,7 @@ Each external integration sits behind a small interface (`typing.Protocol`) and 
 | Vulnerabilities | OSV querybatch + `/v1/vulns/{id}` (`app/scanners/vulns/osv.py`), NVD CVE API for missing CVSS only (`nvd.py`) | recorded real OSV records (`app/scanners/vulns/mock.py`) |
 | Hugging Face | Hub API + capped, verified download (`app/scanners/hf/client.py`) | synthetic benign fixture repo (`app/scanners/hf/mock.py`) |
 | Sandbox | Docker CLI as an argv list (`app/scanners/sandbox/docker_provider.py`) | synthetic bundle (`app/scanners/sandbox/mock.py`) |
-| Chain | web3.py → Hardhat | in-memory ledger |
+| Chain | web3.py → local Hardhat (`app/blockchain/web3_provider.py`) | in-memory ledger (`app/blockchain/mock.py`) |
 
 Mock output always carries `source="mock"`. The API returns that tag (`is_mock`, `contains_mock`)
 and the UI shows it. Providers are chosen with env vars (`SBOM_PROVIDER`, `VULN_PROVIDER`, `HF_PROVIDER`) and
@@ -360,6 +360,66 @@ comparison (0.731, against 0.097 with one), and every first scan has no hash com
 on the synthetic validation split and counts changed decisions. It is analysis only: it fits
 nothing, does not use the test split, and does not validate the parameters.
 
+### Phase 7 blockchain evidence (`app/blockchain/`, `contracts/`)
+
+An anchor shows that a record has not been rewritten. It does not show that the scanner was correct.
+
+**On-chain.** Exactly eight fields: `artifact_id`, `artifact_hash`, `bom_hash`, `provenance_hash`,
+`risk_score`, `decision`, `scanner_version`, `timestamp`. The score is stored in millionths, and
+`NO_SCORE` (`type(uint32).max`) means no score was computed, so null can never read as 0. A zero hash means
+that evidence was absent, and is listed in `missing_evidence`. Anchors are append-only and only the deploying
+account can add them. The contract is for a local chain: the provider refuses a non-local RPC host and
+any chain id other than 31337.
+
+**Anchoring.** `anchor_scan` takes hashes and mock flags from `build_evidence`, and the score, decision and
+timestamp from the stored `RiskDecision`. It refuses an unfinished scan, a missing decision, a missing or
+invalid artifact hash, an invalid other hash, and mock evidence on the real chain. A scan can be anchored once,
+so changed database values cannot be re-anchored. A row is written before sending, so a retry after a crash
+adopts the matching on-chain anchor instead of sending another. The pipeline step runs after the scan is
+completed, is off by default (`BLOCKCHAIN_ANCHOR_ON_SCAN=false`), and cannot fail the scan.
+
+**Verification.** `POST /scans/{id}/verify` reports, per field, the anchor row (`stored`), the live table
+(`source_table`), a fresh value (`recomputed`: a file digest for the three hashes) and the `chain` value, plus
+a comparison of the off-chain `record_hash`. File names are fixed in code and never read from the database. The
+first matching rule decides:
+
+| # | Condition | State | Reason |
+|---|---|---|---|
+| 1 | Scan unfinished or has no decision, and no anchor row | NOT ANCHORED | `scan_not_anchorable` |
+| 2 | Provider disabled | UNKNOWN | `chain_provider_disabled` |
+| 3 | Chain unreachable | UNKNOWN | `chain_unavailable` |
+| 4 | Wrong chain id or non-local RPC | UNKNOWN | `chain_refused` |
+| 5 | Contract gone | UNKNOWN | `chain_state_lost` |
+| 6 | No row, no anchor | NOT ANCHORED | `no_anchor` |
+| 7 | No row, anchor on chain | MISMATCH | `anchor_without_row` |
+| 8 | Row made by another provider | UNKNOWN | `provider_mismatch` |
+| 9 | Row not confirmed, no anchor | NOT ANCHORED | `anchor_not_confirmed` |
+| 10 | Row not confirmed, anchor on chain | UNKNOWN | `anchor_unconfirmed` |
+| 11 | Row is on a different contract | UNKNOWN | `contract_changed` |
+| 12 | Anchor gone and its block gone or changed, or mock ledger lost | UNKNOWN | `chain_state_lost` |
+| 13 | Anchor gone from an intact chain | MISMATCH | `anchor_missing` |
+| 14 | More than one anchor | MISMATCH | `anchor_count_mismatch` |
+| 15 | Stored receipt differs from the chain | MISMATCH | `receipt_mismatch` |
+| 16 | Any field differs | MISMATCH | `evidence_mismatch` |
+| 17 | Every compared field matches, but a file cannot be read | UNKNOWN | `offchain_evidence_unavailable` |
+| 18 | Everything matches and every hash was recomputed | VERIFIED | `verified` |
+
+A definite difference outranks a missing file. Chain trouble returns HTTP 200 with UNKNOWN, never VERIFIED.
+A replaced file (a symlink or a directory) counts as changed. A file that is gone counts as unavailable.
+
+Known limitations:
+- The Hardhat chain runs in memory, so a restart loses every anchor. Those scans report UNKNOWN.
+- The Compose `workspace` named volume holds untrusted artifacts in Docker's storage until
+  `docker compose down -v` removes it. Only the `api` service mounts it, and nothing in the application
+  executes its contents.
+- The volume is not mounted `noexec`. Docker's local driver applies mount options only with a backing
+  device or tmpfs, and tmpfs would lose the files on restart. Accepted for the MVP.
+- Anchored scans whose files are gone report UNKNOWN (`offchain_evidence_unavailable`), including any made
+  before the volume existed.
+- Hugging Face files too large to download are outside the artifact tree digest, so verification covers
+  only what was downloaded. Their Hub-reported hashes are covered only through the provenance record.
+- Sends are serialized per process, so several API workers sharing one key could collide on a nonce.
+
 ## 5. Data model (PostgreSQL)
 
 | Entity | Key fields | Phase |
@@ -372,7 +432,7 @@ nothing, does not use the test split, and does not validate the parameters.
 | GraphNode / GraphEdge | scan_id, node_key, node_type, label, component_id, attributes / source_key, target_key, relation, origin | 2–3 |
 | ProvenanceRecord | id, scan_id, source_known, revision_pinned, resolved_commit, signed, signature_files_present, provenance_present, hash_changed, previous_scan_id, lineage_completeness, checks, record_sha256, source | 3 |
 | RiskDecision | scan_id, risk_score, decision, layer_scores, ml_probability, anomaly_score, model_version, explanation | 6 |
-| BlockchainEvidence | scan_id, tx_hash, artifact_hash, bom_hash, provenance_hash, block_number, anchored_at | 7 |
+| BlockchainEvidence | scan_id (unique), artifact_id, artifact_hash, bom_hash, provenance_hash, risk_score_scaled, decision, scanner_version, evidence_timestamp, record_hash, status, source, tx_hash, block_number, block_hash, anchor_index, chain_id, contract_address, anchored_at | 7 |
 
 Tables are added through Alembic migrations in the phase that first uses them.
 

@@ -170,8 +170,13 @@ def test_root_owned_workspace_is_refused(tmp_path):
 def test_compose_api_has_no_docker_socket():
     compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
     assert "docker.sock" not in (REPO / "docker-compose.yml").read_text()
-    # The only mount allowed is the trusted model directory, read-only.
-    assert compose["services"]["api"]["volumes"] == ["./ml/models:/app/ml/models:ro"]
+    # Exactly two mounts are allowed: the trusted model directory, read-only, and the named
+    # workspace volume that verification reads. The volume must stay plain and named.
+    assert compose["services"]["api"]["volumes"] == [
+        "./ml/models:/app/ml/models:ro",
+        "workspace:/app/workspace",
+    ]
+    assert compose["volumes"]["workspace"] is None
     api = compose["services"]["api"]
     assert not {"tmpfs", "volumes_from", "devices", "privileged", "cap_add"} & set(api)
     assert not [key for key in ("network_mode", "pid", "ipc") if api.get(key) == "host"]
@@ -179,23 +184,42 @@ def test_compose_api_has_no_docker_socket():
 
 _SOCKET = "/var/run/docker.sock"
 _MODELS = "./ml/models:/app/ml/models:ro"
+_WORKSPACE = "workspace:/app/workspace"
 _API_MOUNT_VIOLATIONS = {
-    "socket_added": [_MODELS, f"{_SOCKET}:{_SOCKET}"],
-    "socket_added_read_only": [_MODELS, f"{_SOCKET}:{_SOCKET}:ro"],
-    "socket_replaces_models": [f"{_SOCKET}:/app/ml/models:ro"],
-    "socket_long_form": [_MODELS, {"type": "bind", "source": _SOCKET, "target": _SOCKET}],
-    "models_read_write": ["./ml/models:/app/ml/models:rw"],
-    "models_default_mode_is_writable": ["./ml/models:/app/ml/models"],
-    "models_long_form_writable": [
-        {"type": "bind", "source": "./ml/models", "target": "/app/ml/models"}
+    "socket_added": [_MODELS, _WORKSPACE, f"{_SOCKET}:{_SOCKET}"],
+    "socket_added_read_only": [_MODELS, _WORKSPACE, f"{_SOCKET}:{_SOCKET}:ro"],
+    "socket_replaces_models": [f"{_SOCKET}:/app/ml/models:ro", _WORKSPACE],
+    "socket_replaces_workspace": [_MODELS, f"{_SOCKET}:/app/workspace"],
+    "socket_long_form": [
+        _MODELS,
+        _WORKSPACE,
+        {"type": "bind", "source": _SOCKET, "target": _SOCKET},
     ],
-    "extra_writable_bind": [_MODELS, "./backend:/app/extra"],
-    "extra_writable_named_volume": [_MODELS, "pgdata:/app/extra"],
-    "extra_read_only_bind": [_MODELS, "./backend:/app/extra:ro"],
+    "models_read_write": ["./ml/models:/app/ml/models:rw", _WORKSPACE],
+    "models_default_mode_is_writable": ["./ml/models:/app/ml/models", _WORKSPACE],
+    "models_long_form_writable": [
+        {"type": "bind", "source": "./ml/models", "target": "/app/ml/models"},
+        _WORKSPACE,
+    ],
+    "extra_writable_bind": [_MODELS, _WORKSPACE, "./backend:/app/extra"],
+    "extra_writable_named_volume": [_MODELS, _WORKSPACE, "pgdata:/app/extra"],
+    "extra_read_only_bind": [_MODELS, _WORKSPACE, "./backend:/app/extra:ro"],
     "extra_mount_only": ["./backend:/app/extra:ro"],
-    "models_mounted_twice": [_MODELS, _MODELS],
-    "wrong_source": ["./ml:/app/ml/models:ro"],
-    "wrong_target": ["./ml/models:/app/other:ro"],
+    "models_mounted_twice": [_MODELS, _WORKSPACE, _MODELS],
+    "wrong_source": ["./ml:/app/ml/models:ro", _WORKSPACE],
+    "wrong_target": ["./ml/models:/app/other:ro", _WORKSPACE],
+    "workspace_missing": [_MODELS],
+    "workspace_only": [_WORKSPACE],
+    "workspace_host_bind": [_MODELS, "./workspace:/app/workspace"],
+    "workspace_absolute_host_bind": [_MODELS, "/srv/px:/app/workspace"],
+    "workspace_wrong_target": [_MODELS, "workspace:/app/other"],
+    "workspace_other_volume": [_MODELS, "pgdata:/app/workspace"],
+    "workspace_mounted_twice": [_MODELS, _WORKSPACE, _WORKSPACE],
+    "workspace_long_form": [
+        _MODELS,
+        {"type": "volume", "source": "workspace", "target": "/app/workspace"},
+    ],
+    "second_named_volume": [_MODELS, _WORKSPACE, "extra:/app/extra"],
 }
 
 
@@ -206,6 +230,27 @@ def _compose_copy(tmp_path, monkeypatch, mutate=None):
         mutate(compose)
     (tmp_path / "docker-compose.yml").write_text(yaml.safe_dump(compose))
     monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+
+
+def test_only_the_api_mounts_the_workspace_volume():
+    services = yaml.safe_load((REPO / "docker-compose.yml").read_text())["services"]
+    users = [
+        name
+        for name, service in services.items()
+        if any("workspace:" in str(volume) for volume in service.get("volumes", []))
+    ]
+    assert users == ["api"]
+
+
+def test_api_mount_check_rejects_a_workspace_volume_with_a_host_path(tmp_path, monkeypatch):
+    def mutate(compose):
+        compose["volumes"]["workspace"] = {
+            "driver_opts": {"type": "none", "o": "bind", "device": "/srv/px"}
+        }
+
+    _compose_copy(tmp_path, monkeypatch, mutate)
+    with pytest.raises(AssertionError):
+        test_compose_api_has_no_docker_socket()
 
 
 def test_api_mount_check_accepts_the_real_compose_file(tmp_path, monkeypatch):

@@ -20,6 +20,12 @@ class MockChainProvider:
         self._anchors: dict[UUID, list[ChainAnchor]] = {}
         self._receipts: dict[tuple[UUID, int], AnchorReceipt] = {}
 
+    def location(self) -> tuple[None, None]:
+        return None, None
+
+    def block_hash_at(self, number: int) -> None:
+        return None
+
     def anchors(self, artifact_id: UUID) -> list[ChainAnchor]:
         with self._lock:
             return list(self._anchors.get(artifact_id, []))

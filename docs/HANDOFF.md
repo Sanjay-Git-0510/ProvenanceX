@@ -89,6 +89,15 @@ _Last updated: 2026-11-09_
   no-credentials, no-port, no-IP-literal and public-address checks still apply to every hop.
 - Hugging Face downloads follow up to 5 redirect hops (`MAX_REDIRECTS`), accepted for the MVP.
 
+- **The Compose `workspace` volume holds untrusted artifacts.** Scanned files stay in the
+  `provenancex_workspace` named volume, in Docker's storage, until `docker compose down -v` removes
+  it. Only the `api` service mounts it, and nothing in the application executes its contents.
+- **The `workspace` volume is not mounted `noexec`.** Docker's local volume driver applies mount
+  options only with a backing device or tmpfs, and tmpfs would lose the files on restart. Accepted
+  for the MVP. Do not run files from this volume by hand.
+- **Scans made before the `workspace` volume existed report UNKNOWN**
+  (`offchain_evidence_unavailable`) if anchored, because their files were lost with the old container.
+
 ## As-built differences from the approved Phase 3 plan
 - Download redirects allow up to 5 hops (`MAX_REDIRECTS`); the plan said 3.
 - The redirect allowlist also accepts any `*.hf.co` host (up to 5 dots), because Hugging Face CDN
@@ -99,10 +108,9 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 7 Milestone A (contract and Hardhat) is committed (`a11e58a`). Milestone B (web3.py adapter,
-anchoring) is done and waiting to be committed.** Milestone C (verification API, pipeline wiring) is
-not started. See "Phase 7 progress". The approved Compose `workspace` named volume and its
-hardening-test change belong to Milestone C.
+**Phase 7 Milestones A (`a11e58a`) and B (`21a89f7`) are committed. Milestone C (verification API,
+pipeline wiring) is done and waiting to be committed**, which completes Phase 7. See "Phase 7
+progress". Phase 8 (dashboard) is next and is not started; waiting for the go-ahead.
 
 Standing notes:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
@@ -147,9 +155,43 @@ Standing notes:
 
 ## Phase 7 progress
 
-- **Milestone B (web3.py adapter and anchoring): complete, not yet committed.** The service layer
-  only: no endpoint or pipeline step calls `anchor_scan` until Milestone C, and
-  `BLOCKCHAIN_ANCHOR_ON_SCAN` has no effect yet.
+- **Milestone C (verification API and pipeline wiring): complete, not yet committed.**
+  - New: `app/blockchain/verification.py`, `app/api/blockchain.py`, `app/pipeline/anchor_stage.py`,
+    `tests/unit/test_blockchain_verification.py`, `tests/api/test_scans_blockchain.py`,
+    `tests/security/test_blockchain_boundaries.py`. Endpoints: `POST /scans/{id}/anchor`,
+    `GET /scans/{id}/blockchain` (stored data only) and `POST /scans/{id}/verify`.
+  - **Verification** (rules in `docs/architecture.md`): VERIFIED, MISMATCH, NOT ANCHORED or UNKNOWN, always
+    with a `reason`. Each field reports `stored` (the anchor row), `source_table` (the live table),
+    `recomputed` (a file digest for the three hashes, otherwise the re-encoded live value) and `chain`.
+    `source_table` was added so a changed `Artifact.sha256` cannot pass while the file stays intact. A ninth
+    comparison covers `record_hash`.
+  - **Anchor step:** runs after `mark_completed`, through a guard so that it cannot fail the scan. With
+    `BLOCKCHAIN_ANCHOR_ON_SCAN=false` (the default) the `anchor` stage is `skipped`. Tx hashes stay out of
+    stage entries because the `/evidence` sanitizer would redact them.
+  - **Compose:** named volume `workspace:/app/workspace`, `api` only.
+  - **Different from the approved list:** the volume assertion and its negative cases are in
+    `tests/unit/test_sandbox_hardening.py`, not `test_compose_settings.py`, because that is where the real
+    hardening test lives. `tests/conftest.py` also gained `write_scan_evidence`. No weight or threshold changed.
+  - **Verified on this machine (2026-11-09), Compose Postgres on 5433:**
+    - The exact CI ruff commands: clean. `alembic check`: no drift (no migration in this milestone)
+    - `pytest -m "not network and not sandbox and not chain"`, including Postgres: 2386 passed, 0 failed,
+      0 skipped, 72 deselected, on Python 3.14 and 3.12.16 (disposable API-image container)
+    - `pytest -m chain` on the Compose chain and Postgres: 30 passed, 0 failed, 0 skipped, on 3.14 and 3.12.16.
+      Covers tampering on the real chain and a reset that removes the anchor's block (`evm_snapshot`/`evm_revert`)
+    - `npx hardhat test`: 32 passing. `check-abi.js`: match (17 entries)
+    - Breaking four verifier rules on purpose made 41, 5, 3 and 3 tests fail; the code was then restored
+    - **Compose end-to-end, benign fixture, real Syft and OSV, test key in a shell variable only:** NOT ANCHORED
+      before anchoring; anchored (`web3`, REVIEW, 0.483452); second anchor 409; VERIFIED; still VERIFIED after
+      recreating the API container; MISMATCH (`artifact_hash`, `record_hash`) after editing one file; VERIFIED
+      once restored; UNKNOWN (`chain_unavailable`) with Hardhat stopped. The scan, its files and the Hardhat
+      container were removed afterwards, and the API was recreated on default settings. This checks the wiring on
+      one benign fixture and is not a detection result.
+  - **Not run:** `pytest -m network` and `pytest -m sandbox` (the other 42 deselected), frontend checks
+    (frontend unchanged), the CI workflow on GitHub. A wrong chain ID was tested with a fake web3 only, because
+    the local chain is always 31337.
+
+- **Milestone B (web3.py adapter and anchoring): complete and committed (`21a89f7`).** The service layer
+  only; Milestone C added the endpoints and pipeline step.
   - New: `app/blockchain/{base,encoding,web3_provider,mock,anchoring}.py`, `abi.json`,
     `app/schemas/blockchain.py`, migration `0006` (`blockchain_evidence`), `contracts/scripts/check-abi.js`,
     four `tests/unit/test_blockchain_*.py` files, `tests/integration/test_chain_live.py` (marker `chain`,

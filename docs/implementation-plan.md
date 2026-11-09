@@ -76,6 +76,7 @@ As built: the `static` stage runs for software and model scans, and the optional
 - `contracts/ProvenanceEvidence.sol`, the Hardhat config and deploy script, and the `hardhat` Compose service
 - A web3.py adapter with a mock, `BlockchainEvidence`, `/blockchain`, and `POST /verify`
 - Verification states: VERIFIED, MISMATCH, NOT ANCHORED and UNKNOWN. The tests prove that a changed artifact hash produces MISMATCH.
+- Status: implemented in three milestones (contract and Hardhat; web3.py adapter and anchoring; verification API and pipeline wiring). Anchoring during a scan is off by default (`BLOCKCHAIN_ANCHOR_ON_SCAN=false`), and `POST /scans/{id}/anchor` is the extra endpoint it needs. See `docs/architecture.md`.
 
 ## Phase 8: Dashboard
 - Apply `docs/design/lumora-reference.md`, built only on real API data

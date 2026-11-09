@@ -42,6 +42,8 @@ UNAVAILABLE_CODES = frozenset(
         ErrorCode.VULN_SOURCE_UNAVAILABLE,
         ErrorCode.HF_UNAVAILABLE,
         ErrorCode.SANDBOX_UNAVAILABLE,
+        ErrorCode.CHAIN_UNAVAILABLE,
+        ErrorCode.BLOCKCHAIN_DISABLED,
     }
 )
 

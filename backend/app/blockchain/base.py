@@ -54,6 +54,14 @@ class AnchorReceipt:
 class ChainProvider(Protocol):
     source: str
 
+    def location(self) -> tuple[int | None, str | None]:
+        """The chain id and contract address in use. A mock has neither."""
+        ...
+
+    def block_hash_at(self, number: int) -> str | None:
+        """The hash of a block, or None if that block does not exist."""
+        ...
+
     def anchors(self, artifact_id: UUID) -> list[ChainAnchor]:
         """Every anchor stored for an artifact, oldest first."""
         ...

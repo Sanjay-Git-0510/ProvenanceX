@@ -130,6 +130,9 @@ services:
       BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:-}
     volumes:
       - ./ml/models:/app/ml/models:ro
+      # Off-chain evidence, kept so that verification can recompute hashes. A named volume, never
+      # a host bind mount. Holds untrusted artifacts until `docker compose down -v`.
+      - workspace:/app/workspace
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -158,3 +161,4 @@ services:
 
 volumes:
   pgdata:
+  workspace:

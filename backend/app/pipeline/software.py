@@ -37,6 +37,7 @@ from app.core.hashing import (
     tree_digest,
 )
 from app.db.models import ArtifactSource, Scan, utcnow
+from app.pipeline.anchor_stage import run_anchor_stage
 from app.pipeline.graph_stage import run_graph_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
@@ -226,4 +227,7 @@ def run_software_ingestion(
     ) -> None:
         _run_evidence_stages(session, sid, workspace, settings, resolved, ingested)
 
-    run_scan(scan_id, session_factory, settings, ingest, evidence_stages)
+    def anchor(session: Session, sid: UUID) -> None:
+        run_anchor_stage(session, sid, settings, resolved.chain)
+
+    run_scan(scan_id, session_factory, settings, ingest, evidence_stages, anchor)

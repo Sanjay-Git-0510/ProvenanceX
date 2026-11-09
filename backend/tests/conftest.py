@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.scans import get_session_factory
 from app.core.config import Settings, get_settings
+from app.core.hashing import sha256_file, tree_digest
 from app.db import models  # noqa: F401  (registers tables on Base.metadata)
 from app.db.base import Base
 from app.db.database import get_db
@@ -28,6 +29,7 @@ from app.db.models import (
     ScanStatus,
 )
 from app.main import create_app
+from app.pipeline.workspace import create_workspace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SIMPLE_PROJECT = FIXTURES / "software" / "simple_python_project"
@@ -233,3 +235,19 @@ def make_anchorable_scan(
         )
     session.commit()
     return scan.id
+
+
+def write_scan_evidence(session, scan_id, settings, *, bom=True, provenance=True):
+    """Create real off-chain files for a scan and store their digests. Returns the workspace."""
+    workspace = create_workspace(settings.workspace_root, scan_id)
+    (workspace.src_dir / "app.py").write_text("print('benign fixture')\n", encoding="utf-8")
+    scan = session.get(Scan, scan_id)
+    scan.artifact.sha256 = tree_digest(workspace.src_dir).sha256
+    if bom:
+        (workspace.root / "sbom.cdx.json").write_text('{"bomFormat":"CycloneDX"}', encoding="utf-8")
+        scan.bom_sha256 = sha256_file(workspace.root / "sbom.cdx.json")
+    if provenance:
+        (workspace.root / "provenance.json").write_text('{"checks":[]}', encoding="utf-8")
+        scan.provenance.record_sha256 = sha256_file(workspace.root / "provenance.json")
+    session.commit()
+    return workspace

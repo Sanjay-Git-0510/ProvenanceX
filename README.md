@@ -7,11 +7,11 @@ takes a software repo or package, or an AI model artifact, and does the followin
 2. Produces an explainable **0–1 risk score** and an **ALLOW / REVIEW / BLOCK** decision.
 3. Anchors compact evidence on a local blockchain.
 
-> **Status: Phase 7, blockchain evidence (in progress).** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
+> **Status: Phase 7, blockchain evidence.** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
 > known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
-> ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. The evidence contract, local chain and anchoring service exist, but no endpoint
-> or pipeline step anchors or verifies scans yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
+> ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. The dashboard
+> is not built yet. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Binding project contract: [CLAUDE.md](CLAUDE.md)
@@ -85,6 +85,9 @@ Live-internet tests (marker `network`: GitHub clone, OSV, NVD, Hugging Face) run
 | GET | `/api/v1/scans/{scan_id}/findings` | Findings, highest CVSS first. Filters: `category`, `severity`, `source`, `limit`, `offset`. Each item has a separate `cvss` object, `source` and `is_mock`. |
 | GET | `/api/v1/scans/{scan_id}/graph` | Dependency or model-lineage graph (`graph_kind`), nodes and edges, graph features, `limitations`, and `is_mock` |
 | GET | `/api/v1/scans/{scan_id}/evidence` | Bounded, sanitized evidence summary: stage statuses and reasons, feature vector with null reasons, finding and component summaries with sources, provenance record, hashes, model version, mock flags and the synthetic-training label. Pages with `findings_limit`/`findings_offset` and `components_limit`/`components_offset` (at most 200 per page). Contains no file contents, raw SBOMs or traces |
+| POST | `/api/v1/scans/{scan_id}/anchor` | Anchor a completed scan on the local chain, once. Returns a structured error and sends nothing if it is refused |
+| GET | `/api/v1/scans/{scan_id}/blockchain` | The stored anchor record. Makes no verification claim |
+| POST | `/api/v1/scans/{scan_id}/verify` | Recompute the evidence and compare it with the anchor and the chain. Returns `VERIFIED`, `MISMATCH`, `NOT ANCHORED` or `UNKNOWN` with a reason and the values for each field |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
 
@@ -198,8 +201,7 @@ Limitations:
 ## Local chain
 
 `docker compose up` also starts a local Hardhat chain, bound to `127.0.0.1:8545`. It is for local
-development only and runs in memory, so restarting it erases every anchor. The anchoring service
-is built, but no endpoint or pipeline step calls it yet.
+development only and runs in memory, so restarting it erases every anchor.
 
 `BLOCKCHAIN_PROVIDER` is `disabled` by default. `web3` accepts only a local RPC host and chain id
 31337. `mock` is an in-memory ledger whose results are labeled `source="mock"`. A mock is never used
@@ -221,6 +223,33 @@ docker compose --profile chain-deploy run --rm hardhat-deploy
 # DATABASE_URL, BLOCKCHAIN_RPC_URL, BLOCKCHAIN_CONTRACT_ADDRESS and BLOCKCHAIN_PRIVATE_KEY.
 PROVENANCEX_CHAIN_TESTS=1 pytest -m chain
 ```
+
+### Anchoring and verifying a scan
+
+Set `BLOCKCHAIN_PROVIDER=web3`, `BLOCKCHAIN_CONTRACT_ADDRESS` and `BLOCKCHAIN_PRIVATE_KEY` in your
+git-ignored `.env`, then restart the API.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/scans/<scan_id>/anchor   # a scan can be anchored once
+curl http://localhost:8000/api/v1/scans/<scan_id>/blockchain       # stored data, no verification claim
+curl -X POST http://localhost:8000/api/v1/scans/<scan_id>/verify   # recompute and compare
+```
+
+Set `BLOCKCHAIN_ANCHOR_ON_SCAN=true` to anchor each completed scan automatically. It is off by default.
+
+| State | Meaning |
+|---|---|
+| `VERIFIED` | Every hash was recomputed and every value matches the anchor and the chain |
+| `MISMATCH` | Something differs (see `reason` and each field's `status`) |
+| `NOT ANCHORED` | No anchor exists for this scan |
+| `UNKNOWN` | It could not be checked: chain unavailable or reset, or off-chain files missing |
+
+`VERIFIED` means the record has not changed since it was anchored. It does not show that the scanner
+was correct or that the artifact is safe.
+
+Scanned files are kept in the `provenancex_workspace` Docker volume so that hashes can be recomputed.
+It holds **untrusted artifacts** until you run `docker compose down -v`. Anchored scans whose files are
+gone, including any made before this volume existed, report `UNKNOWN`.
 
 The full steps and the on-chain encoding are in [contracts/README.md](contracts/README.md). Use only
 Hardhat's public test keys, and never a real key.

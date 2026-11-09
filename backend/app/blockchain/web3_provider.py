@@ -18,7 +18,7 @@ from uuid import UUID
 import requests
 from eth_account import Account
 from web3 import HTTPProvider, Web3
-from web3.exceptions import ContractLogicError, Web3Exception
+from web3.exceptions import BlockNotFound, ContractLogicError, Web3Exception
 from web3.logs import DISCARD
 
 from app.blockchain.base import SOURCE_WEB3, AnchorReceipt, AnchorRecord, ChainAnchor
@@ -131,7 +131,12 @@ class Web3ChainProvider:
             if chain_id != LOCAL_CHAIN_ID:
                 raise _refused(f"Only chain id {LOCAL_CHAIN_ID} is allowed")
             if len(w3.eth.get_code(address)) == 0:
-                raise _refused("No contract exists at BLOCKCHAIN_CONTRACT_ADDRESS")
+                raise AppError(
+                    ErrorCode.CHAIN_REFUSED,
+                    "No contract exists at BLOCKCHAIN_CONTRACT_ADDRESS",
+                    _STATUS_REFUSED,
+                    {"reason": "no_contract"},
+                )
             return w3, w3.eth.contract(address=address, abi=ABI), address
 
     def _account(self) -> Any:
@@ -142,6 +147,18 @@ class Web3ChainProvider:
         except Exception:  # noqa: BLE001 - the library error could describe the key
             logger.warning("BLOCKCHAIN_PRIVATE_KEY could not be parsed")
             raise _refused("BLOCKCHAIN_PRIVATE_KEY is not a valid key") from None
+
+    def location(self) -> tuple[int, str]:
+        _, _, address = self._connect()
+        return LOCAL_CHAIN_ID, address
+
+    def block_hash_at(self, number: int) -> str | None:
+        w3, _, _ = self._connect()
+        with _rpc_errors():
+            try:
+                return _hex(w3.eth.get_block(number)["hash"])
+            except BlockNotFound:
+                return None
 
     def anchors(self, artifact_id: UUID) -> list[ChainAnchor]:
         _, contract, _ = self._connect()

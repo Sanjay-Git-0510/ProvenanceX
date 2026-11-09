@@ -5,9 +5,10 @@ BLOCKCHAIN_PRIVATE_KEY and DATABASE_URL in the environment. The key is read only
 """
 
 import os
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -17,11 +18,19 @@ from sqlalchemy.orm import Session
 
 from app.blockchain.anchoring import anchor_scan
 from app.blockchain.base import AnchorRecord
+from app.blockchain.verification import verify_scan
 from app.blockchain.web3_provider import Web3ChainProvider
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.db.models import AnchorStatus, Artifact, BlockchainEvidence, Scan, utcnow
-from tests.conftest import make_anchorable_scan
+from app.db.models import (
+    AnchorStatus,
+    Artifact,
+    BlockchainEvidence,
+    RiskDecision,
+    Scan,
+    utcnow,
+)
+from tests.conftest import make_anchorable_scan, write_scan_evidence
 
 pytestmark = pytest.mark.chain
 
@@ -83,8 +92,10 @@ def _scan(session, **kwargs):
 
 
 @pytest.fixture
-def settings():
-    return get_settings().model_copy(update={"blockchain_timeout_seconds": 20.0})
+def settings(tmp_path):
+    return get_settings().model_copy(
+        update={"blockchain_timeout_seconds": 20.0, "workspace_root": tmp_path / "workspaces"}
+    )
 
 
 def _code(call, *args) -> str:
@@ -209,3 +220,135 @@ def test_crash_recovery_adopts_the_real_anchor(session, settings):
     assert adopted.adopted_existing_anchor is True
     assert adopted.tx_hash == original.tx_hash
     assert len(provider.anchors(original.artifact_id)) == 1
+
+
+def _rpc(method: str, *params):
+    body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(params)}
+    return httpx.post(_env("BLOCKCHAIN_RPC_URL"), json=body, timeout=10).json()["result"]
+
+
+def _anchored(session, settings, **kwargs):
+    scan_id = _scan(session, **kwargs)
+    workspace = write_scan_evidence(session, scan_id, settings)
+    result = anchor_scan(session, scan_id, _provider(), settings)
+    return scan_id, workspace, result
+
+
+def _state(session, scan_id, settings, provider=None):
+    response = verify_scan(session, scan_id, provider or _provider(), settings)
+    return str(response.state), response.reason.code
+
+
+def _decision(session, scan_id):
+    return session.scalars(select(RiskDecision).where(RiskDecision.scan_id == scan_id)).one()
+
+
+def _file(name):
+    def apply(session, scan_id, workspace):
+        (workspace.root / name).write_text("tampered", encoding="utf-8")
+
+    return apply
+
+
+def _artifact_file(session, scan_id, workspace):
+    (workspace.src_dir / "app.py").write_text("tampered", encoding="utf-8")
+
+
+def _db_hash(session, scan_id, workspace):
+    session.get(Scan, scan_id).artifact.sha256 = "d" * 64
+
+
+def _score(session, scan_id, workspace):
+    _decision(session, scan_id).risk_score = 0.1
+
+
+def _null_score(session, scan_id, workspace):
+    _decision(session, scan_id).risk_score = None
+
+
+def _zero_score(session, scan_id, workspace):
+    _decision(session, scan_id).risk_score = 0.0
+
+
+def _verdict(session, scan_id, workspace):
+    _decision(session, scan_id).decision = "ALLOW"
+
+
+def _version(session, scan_id, workspace):
+    session.get(Scan, scan_id).scanner_version = "9.9.9"
+
+
+def _timestamp(session, scan_id, workspace):
+    _decision(session, scan_id).created_at = datetime(2026, 11, 9, 12, 5, tzinfo=UTC)
+
+
+TAMPERING = {
+    "database_hash": _db_hash,
+    "score": _score,
+    "score_to_null": _null_score,
+    "score_to_zero": _zero_score,
+    "decision": _verdict,
+    "version": _version,
+    "timestamp": _timestamp,
+    "artifact_file": _artifact_file,
+    "bom_file": _file("sbom.cdx.json"),
+    "provenance_file": _file("provenance.json"),
+}
+
+
+def test_untouched_scan_verifies_on_the_real_chain(session, settings):
+    scan_id, _, result = _anchored(session, settings)
+    response = verify_scan(session, scan_id, _provider(), settings)
+    assert str(response.state) == "VERIFIED"
+    assert {field.status for field in response.fields} == {"match"}
+    assert response.tx_hash == result.tx_hash
+
+
+@pytest.mark.parametrize("tamper", TAMPERING.values(), ids=TAMPERING)
+def test_tampering_is_a_mismatch_on_the_real_chain(session, settings, tamper):
+    scan_id, workspace, _ = _anchored(session, settings)
+    tamper(session, scan_id, workspace)
+    session.commit()
+    assert _state(session, scan_id, settings) == ("MISMATCH", "evidence_mismatch")
+
+
+def test_null_score_replaced_by_zero_on_the_real_chain(session, settings):
+    scan_id, workspace, _ = _anchored(session, settings, score=None, decision="BLOCK")
+    assert _state(session, scan_id, settings) == ("VERIFIED", "verified")
+    _zero_score(session, scan_id, workspace)
+    session.commit()
+    assert _state(session, scan_id, settings) == ("MISMATCH", "evidence_mismatch")
+
+
+def test_missing_file_is_unknown_on_the_real_chain(session, settings):
+    scan_id, workspace, _ = _anchored(session, settings)
+    (workspace.root / "sbom.cdx.json").unlink()
+    assert _state(session, scan_id, settings) == ("UNKNOWN", "offchain_evidence_unavailable")
+
+
+def test_unreachable_chain_is_unknown(session, settings):
+    scan_id, _, _ = _anchored(session, settings)
+    provider = _provider(url="http://127.0.0.1:1")
+    assert _state(session, scan_id, settings, provider) == ("UNKNOWN", "chain_unavailable")
+
+
+def test_contract_gone_is_unknown(session, settings):
+    scan_id, _, _ = _anchored(session, settings)
+    provider = _provider(address=Account.create().address)
+    assert _state(session, scan_id, settings, provider) == ("UNKNOWN", "chain_state_lost")
+
+
+def test_reset_chain_is_unknown(session, settings):
+    """Really removes the anchor's block from the chain, using a Hardhat snapshot."""
+    snapshot = _rpc("evm_snapshot")
+    scan_id, _, _ = _anchored(session, settings)
+    assert _state(session, scan_id, settings) == ("VERIFIED", "verified")
+    assert _rpc("evm_revert", snapshot) is True
+    assert _state(session, scan_id, settings) == ("UNKNOWN", "chain_state_lost")
+
+
+def test_block_lookup_on_the_real_chain():
+    provider, record = _provider(), _record()
+    receipt = provider.submit(record)
+    assert provider.block_hash_at(receipt.block_number) == receipt.block_hash
+    assert provider.block_hash_at(receipt.block_number + 1_000_000) is None

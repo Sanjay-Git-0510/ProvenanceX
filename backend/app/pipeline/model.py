@@ -32,6 +32,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.hashing import TREE_DIGEST_VERSION, sha256_file, tree_digest
 from app.db.models import ArtifactSource, Scan, utcnow
 from app.pipeline.aibom_stage import AiBomStageOutput, run_aibom_stage
+from app.pipeline.anchor_stage import run_anchor_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.lineage_stage import run_lineage_stage
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
@@ -306,4 +307,7 @@ def run_model_ingestion(
     def evidence(session: Session, sid: UUID, workspace: Workspace, ingested: ModelIngest) -> None:
         _run_evidence_stages(session, sid, workspace, settings, resolved, ingested)
 
-    run_scan(scan_id, session_factory, settings, ingest, evidence)
+    def anchor(session: Session, sid: UUID) -> None:
+        run_anchor_stage(session, sid, settings, resolved.chain)
+
+    run_scan(scan_id, session_factory, settings, ingest, evidence, anchor)

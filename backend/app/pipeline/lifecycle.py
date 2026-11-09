@@ -52,12 +52,24 @@ def mark_completed(session: Session, scan_id: UUID) -> None:
     session.commit()
 
 
+def _run_after_completed(
+    session: Session, scan_id: UUID, step: Callable[[Session, UUID], None]
+) -> None:
+    """A step after completion can never change the outcome of the scan."""
+    try:
+        step(session, scan_id)
+    except Exception:
+        logger.exception("Post-completion step failed for scan %s", scan_id)
+        session.rollback()
+
+
 def run_scan(
     scan_id: UUID,
     session_factory: sessionmaker[Session],
     settings: Settings,
     ingest: Callable[[Session, Scan, Workspace], T],
     evidence: Callable[[Session, UUID, Workspace, T], None],
+    after_completed: Callable[[Session, UUID], None] | None = None,
 ) -> None:
     """Run one scan end to end. `ingest` commits the artifact identity it collected."""
     with session_factory() as session:
@@ -75,6 +87,8 @@ def run_scan(
             ingested = ingest(session, scan, workspace)
             evidence(session, scan_id, workspace, ingested)
             mark_completed(session, scan_id)
+            if after_completed is not None:
+                _run_after_completed(session, scan_id, after_completed)
             return
         except AppError as exc:
             logger.warning("Scan %s failed: %s (%s)", scan_id, exc.code, exc.message)
