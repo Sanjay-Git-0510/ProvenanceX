@@ -64,8 +64,9 @@ _Last updated: 2026-11-09_
   Final results: `pytest -m "not network and not sandbox"` 1770 passed, 0 failed, 0 skipped,
   42 deselected. `pytest -m network` and `pytest -m sandbox` were not run for Phase 5. Details are
   under "Phase 5 progress".
-- **Phase 6 (fusion, policy, SHAP, explanation API): in progress.** Milestone A is complete and
-  awaiting commit. Milestones B and C are not started. Details are under "Phase 6 progress".
+- **Phase 6 (fusion, policy, SHAP, explanation API): in progress.** Milestone A is committed.
+  Milestone B is complete and awaiting commit. Milestone C is not started. Details are under
+  "Phase 6 progress".
 
 ## Known limitations (documented in architecture.md §4)
 - Dependencies are never installed or resolved. If a project has no lockfile (bare
@@ -93,20 +94,83 @@ _Last updated: 2026-11-09_
 
 ## Next step
 
-**Phase 6 Milestone B (SHAP, explanation API, RiskDecision):** not started. Wait for the go-ahead.
-The approved file list is B: `app/risk/model_runtime.py`, `explain.py`, `service.py`,
-`app/schemas/risk.py`, migration `0005`, the `/risk` route, the `shap` pin and tests.
+**Phase 6 Milestone C:** not started. Wait for the go-ahead.
 
 Notes for the rest of Phase 6:
 - Do not adjust any weight, threshold or hyperparameter after looking at test-split results.
 - Null evidence must lower confidence and never read as clean. See the false-positive finding below.
 - Loading artifacts built on Python 3.14 from the 3.12 API image is untested. Milestone C needs
   Docker Desktop running, because this machine has no Python 3.12. If the check fails, stop and ask.
-- Check `shap` 0.54.1 against scikit-learn 1.9.1 first in Milestone B. If incompatible, stop and ask.
+  The shap compatibility check has also only run on Python 3.14.
+- The API image still has no ML packages and `ml/models` is not mounted, so the Compose API reports
+  "ML model unavailable". On the host, set `MODEL_PATH=../ml/models` when running from `backend/`.
+
+## Notes for Phases 7 and 8: `risk_score` can be null
+
+`GET /scans/{id}/risk` has `status` of `pending`, `computed` or `not_computed`, with `reason`
+(`code`, `message`) unless computed. `risk_score` is null, never 0, in three cases:
+
+| Case | `status` | `reason.code` | `decision` |
+|---|---|---|---|
+| Scan queued or running | `pending` | `scan_queued`, `scan_running` | null |
+| Scan failed, or the computation errored (nothing stored) | `not_computed` | `scan_failed`, `risk_computation_error` | null |
+| Scan completed, no rule layer could be scored | `not_computed` | `no_rule_layer_scored` | REVIEW, or BLOCK if a hard rule fired |
+
+**Phase 7 (blockchain):**
+- A null score must never be anchored as 0, and the contract and web3.py adapter must keep "no score"
+  distinct from a real 0 (for example an explicit `hasScore` flag). Choose the encoding in the Phase 7
+  plan and test it, including through verification.
+- A `RiskDecision` row can have a null `risk_score` and a real decision. Handle that row explicitly.
+- `pending`, `scan_failed` and `risk_computation_error` have no `RiskDecision` row and nothing to
+  anchor. Report them as NOT ANCHORED.
+
+**Phase 8 (dashboard):**
+- Show "Not computed" or "Pending" with `reason.message`. Never render null as 0, 0%, an empty gauge
+  or LOW, and never derive a risk band from a null score.
+- `decision` is independent of the score: show a null score beside REVIEW or BLOCK when both occur.
+  `decision` is null while pending or failed, so show no ALLOW/REVIEW/BLOCK badge then.
+- Null applies to each value in `scores` too, and each has its own `reason`.
+- Factors with `evaluated=false` describe missing evidence and must look different from measured
+  factors. Show `training_data.notice` wherever ML output appears, and label `contains_mock_evidence`.
 
 ## Phase 6 progress
 
-- **Milestone A (fusion and policy): complete, awaiting commit.**
+- **Milestone B (SHAP, RiskDecision, `/risk`): complete, awaiting commit.**
+  - New: `app/risk/model_runtime.py`, `explain.py`, `service.py`, `app/schemas/risk.py`, migration
+    `0005` (`risk_decisions`), `GET /api/v1/scans/{id}/risk`, the `shap==0.54.1` pin,
+    `tests/unit/test_risk_explain.py`, `tests/api/test_scans_risk.py`, and new Postgres tests in
+    `tests/integration/test_db_connection.py`.
+  - **shap compatibility check: passed** on Python 3.14 with shap 0.54.1 and scikit-learn 1.9.1,
+    on the saved 300-tree forest loaded through `load_bundle`: no warnings, output shape `(n, 79, 4)`,
+    maximum additivity error against `predict_proba` about 2e-15.
+  - Models load only through `load_bundle`, and a test checks the `app/risk` imports. ML packages
+    are imported lazily, so without them the API still starts and reports "ML model unavailable".
+  - SHAP explains the Random Forest probability of any non-benign class, not the ProvenanceX risk.
+    A feature's factor is the sum over its encoded columns. Factors are marked `evaluated=false`
+    with a `null_reason` when the feature had no value.
+  - **Design decisions to review:**
+    - The result is computed on the first `GET /risk` of a completed scan, then stored and reused.
+      It is not a pipeline stage yet, and a stored result does not change if models are retrained.
+    - Live comparison features are rebuilt from the database against the prior scan the provenance
+      stage used. `version_consistency` reads the kept workspace, and is null if it is gone.
+    - Dataset scans report ML unavailable, because the models were trained only on software, model
+      and LoRA records.
+  - **Limitation:** `config_changed` is always null (`not_determinable`) on live scans, because
+    config digests are not persisted.
+  - **Beyond the approved list:** `app/ml/preprocessing.py` gained `transform_features` and a public
+    `feature_columns`, so a live scan can be encoded without a labeled `FeatureRecord`. Training
+    behavior is unchanged.
+  - **Verified on this machine (2026-11-09), Python 3.14, Compose Postgres on 5433:**
+    - The exact CI ruff commands (`backend/` and `ml/scripts/`): clean
+    - `alembic upgrade head`, `downgrade 0004` (table removed), `upgrade head`, `alembic check`: OK,
+      no drift
+    - `pytest -m "not network and not sandbox"`, including the Postgres tests: 1945 passed, 0 failed,
+      0 skipped, 42 deselected
+    - Smoke run of `/risk` with the saved models on the benign fixture ZIP, SQLite and mock SBOM/OSV:
+      200, `computed`, SHAP available. It checks the wiring only and is not a detection result.
+  - **Not run:** `pytest -m network`, `pytest -m sandbox` (the 42 deselected), frontend tests, Docker
+    builds, any test on Python 3.12, and `/risk` through the Compose API.
+- **Milestone A (fusion and policy): complete and committed.**
   - New: `app/risk/policy_config.py`, `types.py`, `layers.py`, `fusion.py`, `policy.py`,
     `sensitivity.py`, `ml/scripts/fusion_sensitivity.py`, the generated
     `ml/reports/fusion_sensitivity.{md,json}`, `tests/risk_helpers.py` and five `test_risk_*` files.

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -60,6 +61,12 @@ class FindingCategory(StrEnum):
     STATIC = "static"
     BEHAVIORAL = "behavioral"
     PROVENANCE = "provenance"
+
+
+class RiskVerdict(StrEnum):
+    ALLOW = "ALLOW"
+    REVIEW = "REVIEW"
+    BLOCK = "BLOCK"
 
 
 def _enum(enum_cls: type[StrEnum], name: str) -> Enum:
@@ -133,6 +140,9 @@ class Scan(Base):
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
     provenance: Mapped["ProvenanceRecord | None"] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    risk_decision: Mapped["RiskDecision | None"] = relationship(
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -264,3 +274,43 @@ class ProvenanceRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     scan: Mapped[Scan] = relationship(back_populates="provenance")
+
+
+class RiskDecision(Base):
+    """The stored risk result for one scan (pipeline steps 11-18).
+
+    risk_score is NULL when no rule layer could be scored; it is never stored as 0 in that
+    case. cvss_max, ml_probability, anomaly_score and risk_score are separate measures.
+    """
+
+    __tablename__ = "risk_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "risk_score IS NULL OR (risk_score >= 0 AND risk_score <= 1)",
+            name="ck_risk_decisions_score_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    risk_score: Mapped[float | None] = mapped_column(Float)
+    rule_only_score: Mapped[float | None] = mapped_column(Float)
+    decision: Mapped[RiskVerdict] = mapped_column(_enum(RiskVerdict, "risk_verdict"), index=True)
+    decision_basis: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column(Float)
+    confidence_label: Mapped[str] = mapped_column(String(16))
+    cvss_max: Mapped[float | None] = mapped_column(Float)
+    ml_status: Mapped[str] = mapped_column(String(16))
+    ml_probability: Mapped[float | None] = mapped_column(Float)
+    xgb_probability: Mapped[float | None] = mapped_column(Float)
+    anomaly_score: Mapped[float | None] = mapped_column(Float)
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    policy_version: Mapped[str] = mapped_column(String(64))
+    layer_scores: Mapped[dict[str, Any]] = mapped_column(JSONType)
+    # The full assessment, SHAP factors, training-data label and evidence references.
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    scan: Mapped[Scan] = relationship(back_populates="risk_decision")

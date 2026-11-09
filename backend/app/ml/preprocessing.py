@@ -10,13 +10,19 @@ values come from the training split only; fit_preprocessor refuses any other spl
 
 import math
 import statistics
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
-from app.ml.feature_schema import FEATURE_NAMES, FEATURES_BY_NAME, FeatureRecord, Kind
+from app.ml.feature_schema import (
+    FEATURE_NAMES,
+    FEATURES_BY_NAME,
+    FeatureRecord,
+    FeatureValue,
+    Kind,
+)
 
 PREPROCESSING_FORMAT = "provenancex-preprocessing-v1"
 NULL_SUFFIX = "__is_null"
@@ -58,7 +64,7 @@ def _as_number(name: str, value: bool | int | float) -> float:
     return number
 
 
-def _feature_columns(feature: FittedFeature) -> list[str]:
+def feature_columns(feature: FittedFeature) -> list[str]:
     if feature.kind == Kind.CATEGORY:
         values = [f"{feature.name}={category}" for category in feature.categories or []]
     else:
@@ -93,7 +99,7 @@ def fit_preprocessor(
             dropped.append(name)
     if not fitted:
         raise ValueError("Every feature is null in the training set")
-    columns = [column for feature in fitted for column in _feature_columns(feature)]
+    columns = [column for feature in fitted for column in feature_columns(feature)]
     return PreprocessingParams(
         train_record_count=len(train_records),
         features=fitted,
@@ -111,10 +117,16 @@ def _encode(feature: FittedFeature, value: bool | int | float | str | None) -> l
     return [_as_number(feature.name, value), is_null]
 
 
+def transform_features(
+    params: PreprocessingParams, feature_rows: Sequence[Mapping[str, FeatureValue]]
+) -> np.ndarray:
+    """Build the matrix from plain feature mappings, as a live scan provides them."""
+    rows = [
+        [cell for f in params.features for cell in _encode(f, row[f.name])] for row in feature_rows
+    ]
+    return np.asarray(rows, dtype=float).reshape(len(feature_rows), len(params.columns))
+
+
 def transform(params: PreprocessingParams, records: Sequence[FeatureRecord]) -> np.ndarray:
     """Build the matrix. The result never contains NaN, and its columns are params.columns."""
-    rows = [
-        [cell for f in params.features for cell in _encode(f, record.features[f.name])]
-        for record in records
-    ]
-    return np.asarray(rows, dtype=float).reshape(len(records), len(params.columns))
+    return transform_features(params, [record.features for record in records])

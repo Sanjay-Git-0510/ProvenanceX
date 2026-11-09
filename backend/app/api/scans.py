@@ -31,8 +31,10 @@ from app.pipeline.model import run_model_ingestion
 from app.pipeline.providers import ScanProviders, build_providers
 from app.pipeline.software import run_software_ingestion
 from app.pipeline.workspace import MB, create_workspace, remove_workspace, write_stream_limited
+from app.risk.service import risk_for_scan
 from app.schemas.findings import FindingOut, FindingsResponse, Severity
 from app.schemas.graph import GraphEdgeOut, GraphNodeOut, GraphResponse
+from app.schemas.risk import RiskResponse
 from app.schemas.scans import ScanCreatedResponse, ScanResponse
 from app.security.revision import validate_revision
 from app.security.url_validation import validate_github_repo_url, validate_hf_repo_url
@@ -371,3 +373,12 @@ def get_scan_graph(scan_id: UUID, session_factory: SessionFactoryDep) -> GraphRe
             limitations=list((stage or {}).get("limitations") or []),
             stage=stage,
         )
+
+
+@router.get("/{scan_id}/risk", response_model=RiskResponse)
+def get_scan_risk(
+    scan_id: UUID, session_factory: SessionFactoryDep, settings: SettingsDep
+) -> RiskResponse:
+    """The explainable risk result. risk_score is null, never 0, when it cannot be computed."""
+    with session_factory() as session:
+        return risk_for_scan(session, _get_scan_or_404(session, scan_id), settings)
