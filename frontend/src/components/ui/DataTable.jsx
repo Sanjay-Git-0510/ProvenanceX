@@ -11,13 +11,20 @@ function cellValue(column, row) {
  * columns: [{ key, header, render?, align?: "end", mono?: true }]. `empty` replaces the default
  * empty message, which matters when an empty list does not mean "nothing found".
  */
-export default function DataTable({ caption, columns, rows, getRowKey, empty, captionHidden = false }) {
+export default function DataTable({ caption, columns, rows, getRowKey, empty, captionHidden = false, compact = false }) {
   if (!rows || rows.length === 0) {
     return empty || <EmptyState title="No rows" message={`${caption}: nothing to show.`} headingLevel={3} />;
   }
   return (
     <div className="table-region" role="region" aria-label={caption} tabIndex={0}>
-      <table className="table">
+      <table className={compact ? "table table--compact" : "table"}>
+        {compact ? (
+          <colgroup>
+            {columns.map((column) => (
+              <col key={column.key} style={column.width ? { width: column.width } : undefined} />
+            ))}
+          </colgroup>
+        ) : null}
         <caption className={captionHidden ? "sr-only" : undefined}>{caption}</caption>
         <thead>
           <tr>

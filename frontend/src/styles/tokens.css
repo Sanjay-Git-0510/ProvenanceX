@@ -3,10 +3,10 @@
   color-scheme: dark;
 
   /* Surfaces, lowest to highest. */
-  --surface-0: #0a0a0a;
-  --surface-1: #141413;
-  --surface-2: #1e1d1b;
-  --surface-3: #292826;
+  --surface-0: #090a0f;
+  --surface-1: #111318;
+  --surface-2: #181b22;
+  --surface-3: #22262e;
 
   /* Text */
   --text-primary: #f4f3f0;
@@ -14,7 +14,7 @@
   --text-tertiary: #a3a19b;
 
   /* Lines: hairlines separate; control lines must stay visible (3:1). */
-  --line: #2f2e2b;
+  --line: #23262c;
   --line-control: #7f7d77;
 
   /* One accent */
@@ -75,8 +75,8 @@
   --radius-control: 0.875rem;
 
   /* Elevation: a faint top highlight, then soft shadow on raised layers. */
-  --elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  --elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 16px rgba(0, 0, 0, 0.3);
   --elevation-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 48px rgba(0, 0, 0, 0.5);
 
   /* Motion */

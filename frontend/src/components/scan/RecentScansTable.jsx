@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import useApi from "../../hooks/useApi.js";
-import { formatDateTime, formatRiskScore, humanize } from "../../lib/format.js";
+import { formatDateTime, formatRelativeTime, formatRiskScore, humanize } from "../../lib/format.js";
 import { sanitizeDisplay } from "../../lib/sanitizeDisplay.js";
 import { api } from "../../services/api.js";
 import DecisionDisplay from "../risk/DecisionDisplay.jsx";
@@ -30,13 +30,26 @@ const columns = [
   {
     key: "artifact",
     header: "Artifact",
-    render: (row) => <Link to={`/scans/${row.scan_id}`}>{sanitizeDisplay(row.artifact.name)}</Link>,
+    width: "28%",
+    render: (row) => {
+      const name = sanitizeDisplay(row.artifact.name);
+      return (
+        <Link className="cell-truncate" to={`/scans/${row.scan_id}`} title={name}>
+          {name}
+        </Link>
+      );
+    },
   },
-  { key: "type", header: "Type", render: (row) => humanize(row.artifact.artifact_type) },
-  { key: "status", header: "Status", render: (row) => <ScanStatusBadge status={row.status} /> },
-  { key: "risk", header: "ProvenanceX risk", align: "end", render: (row) => formatRiskScore(row.risk_score) },
-  { key: "decision", header: "Decision", render: (row) => <RowDecision scan={row} /> },
-  { key: "created", header: "Started", render: (row) => formatDateTime(row.created_at) },
+  { key: "type", header: "Type", width: "11%", render: (row) => humanize(row.artifact.artifact_type) },
+  { key: "status", header: "Status", width: "14%", render: (row) => <ScanStatusBadge status={row.status} /> },
+  { key: "risk", header: "Risk", align: "end", width: "10%", render: (row) => formatRiskScore(row.risk_score) },
+  { key: "decision", header: "Decision", width: "22%", render: (row) => <RowDecision scan={row} /> },
+  {
+    key: "created",
+    header: "Started",
+    width: "15%",
+    render: (row) => <time dateTime={row.created_at} title={formatDateTime(row.created_at)}>{formatRelativeTime(row.created_at)}</time>,
+  },
 ];
 
 export default function RecentScansTable({ scans, empty }) {
@@ -48,6 +61,7 @@ export default function RecentScansTable({ scans, empty }) {
       rows={scans}
       getRowKey={(row) => row.scan_id}
       empty={empty}
+      compact
     />
   );
 }

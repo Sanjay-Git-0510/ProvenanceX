@@ -109,3 +109,17 @@ describe("evidence links", () => {
     expect(evidenceLabel("other")).toBe("Evidence");
   });
 });
+
+import { formatRelativeTime } from "../lib/format.js";
+
+describe("formatRelativeTime", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  it("shows compact ages", () => {
+    expect(formatRelativeTime("2026-11-10T11:58:00Z", now)).toBe("2m ago");
+    expect(formatRelativeTime("2026-11-10T09:00:00Z", now)).toBe("3h ago");
+    expect(formatRelativeTime("2026-11-08T12:00:00Z", now)).toBe("2d ago");
+  });
+  it("falls back to a date after a week", () => {
+    expect(formatRelativeTime("2026-10-01T08:05:00Z", now)).toMatch(/Oct 1/);
+  });
+});

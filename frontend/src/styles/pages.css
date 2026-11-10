@@ -291,7 +291,27 @@
   justify-content: space-between;
   gap: var(--space-1);
   padding: var(--space-2);
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--count-accent, var(--line-control));
+  border-radius: var(--radius-card-sm);
+  background: var(--surface-1);
+  box-shadow: var(--elevation-1);
+}
+
+.count-card--queued {
+  --count-accent: var(--status-unknown);
+}
+
+.count-card--running {
+  --count-accent: var(--accent);
+}
+
+.count-card--completed {
+  --count-accent: var(--status-allow);
+}
+
+.count-card--failed {
+  --count-accent: var(--status-block);
 }
 
 .count-strip__value {

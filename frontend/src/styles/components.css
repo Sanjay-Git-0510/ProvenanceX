@@ -445,3 +445,30 @@ button.chip:hover {
     padding: var(--space-4);
   }
 }
+
+/* Compact, fixed-layout tables fit their column without sideways scrolling. */
+.table--compact {
+  table-layout: fixed;
+}
+
+.table--compact th,
+.table--compact td {
+  padding: 0.625rem var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table--compact td {
+  white-space: nowrap;
+}
+
+.cell-truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel {
+  min-width: 0;
+}

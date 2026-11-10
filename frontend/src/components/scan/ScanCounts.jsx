@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import useApi from "../../hooks/useApi.js";
 import { formatCount } from "../../lib/format.js";
+import { POLL_MS } from "../../lib/polling.js";
 import { api } from "../../services/api.js";
 import ErrorState from "../ui/ErrorState.jsx";
 import LoadingState from "../ui/LoadingState.jsx";
@@ -14,14 +15,14 @@ export default function ScanCounts() {
     const pages = await Promise.all(STATUSES.map((status) => api.listScans({ status, limit: 1, signal })));
     return pages.map((page) => page.page?.total ?? 0);
   }, []);
-  const { status, data, error, reload } = useApi(fetcher);
+  const { status, data, error, reload } = useApi(fetcher, { pollMs: POLL_MS });
 
   if (status === "error") return <ErrorState error={error} onRetry={reload} title="Could not load scan counts" />;
   if (!data) return <LoadingState label="Loading scan counts" lines={1} />;
   return (
     <ul className="count-strip">
       {STATUSES.map((name, index) => (
-        <li key={name}>
+        <li key={name} className={`count-card count-card--${name}`}>
           <span className="count-strip__value">{formatCount(data[index])}</span>
           <ScanStatusBadge status={name} />
         </li>

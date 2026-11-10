@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * `fetcher` receives `{ signal }`. Wrap it in useCallback: a new function means a new request.
  * Pass null to wait. Data from a different fetcher is cleared, so one scan never shows another's.
+ * pollMs > 0 refetches on that interval while the tab is visible, keeping the old data on screen.
  * status: "idle" | "loading" | "success" | "error".
  */
-export default function useApi(fetcher) {
+export default function useApi(fetcher, { pollMs = 0 } = {}) {
   const [state, setState] = useState({
     status: fetcher ? "loading" : "idle",
     data: null,
@@ -40,6 +41,14 @@ export default function useApi(fetcher) {
     );
     return () => controller.abort();
   }, [fetcher, attempt]);
+
+  useEffect(() => {
+    if (!fetcher || !pollMs) return undefined;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") setAttempt((value) => value + 1);
+    }, pollMs);
+    return () => clearInterval(timer);
+  }, [fetcher, pollMs]);
 
   const reload = useCallback(() => setAttempt((value) => value + 1), []);
   return { ...state, reload };

@@ -40,6 +40,21 @@ export function formatDateTime(value) {
   return Number.isNaN(date.getTime()) ? "Invalid date" : `${dateFormat.format(date)} UTC`;
 }
 
+/** Compact age such as "2m ago". Older than a week falls back to "Nov 9, 14:05". The full UTC time goes in a title. */
+export function formatRelativeTime(value, now = Date.now()) {
+  if (value === null || value === undefined || value === "") return NOT_RECORDED;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  const seconds = Math.max(0, Math.round((now - date.getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const units = [[60, 60, "m"], [3600, 24, "h"], [86400, 7, "d"]];
+  for (const [size, limit, suffix] of units) {
+    const amount = Math.floor(seconds / size);
+    if (amount < limit) return `${amount}${suffix} ago`;
+  }
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+}
+
 /** Turn an API code such as "ai_specific" into "Ai specific". */
 export function humanize(value) {
   if (typeof value !== "string" || !value) return NOT_AVAILABLE;
