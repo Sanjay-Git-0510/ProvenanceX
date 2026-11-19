@@ -17,6 +17,10 @@ of this instance is an orphan: its scan finished, failed, was recovered by anoth
 its claim was replaced. A container whose scan is not in the database at all is removed only
 once it has stopped.
 
+Verification containers (mode label `rehash`, Milestone C1) belong to a verification job, not
+to a scan run: they carry the job's claim token, and are kept only while that job is running
+under the same token and heartbeating; otherwise they are removed like any other orphan.
+
 Staging volumes (`io.provenancex.role=staging`, same instance label) follow the same rule, and are
 removed after the containers, because Docker refuses to remove a volume that is still mounted
 (that refusal is harmless: the next pass retries). Workspace directories with no scan row at all
@@ -46,13 +50,15 @@ from sqlalchemy.orm import Session
 from app.analysis.hardening import (
     LABEL_CLAIM,
     LABEL_INSTANCE,
+    LABEL_MODE,
     LABEL_ROLE,
     LABEL_SCAN,
     ROLE_ANALYZER,
 )
 from app.analysis.staging import DockerStaging
+from app.core.bounded import printable_excerpt
 from app.core.config import Settings
-from app.db.models import Scan, ScanStatus, utcnow
+from app.db.models import Scan, ScanStatus, VerificationRun, VerificationStatus, utcnow
 from app.pipeline.workspace import discard_workspace
 
 ROLE_FETCHER = "fetcher"
@@ -64,7 +70,17 @@ logger = logging.getLogger(__name__)
 _COMMAND_TIMEOUT_SECONDS = 30
 _MAX_LIST_BYTES = 4 * 1024 * 1024
 _PASSTHROUGH_ENV = ("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "TMPDIR")
-_FIELDS = ("ID", "Names", "State", LABEL_ROLE, LABEL_INSTANCE, LABEL_SCAN, LABEL_CLAIM)
+_FIELDS = (
+    "ID",
+    "Names",
+    "State",
+    LABEL_ROLE,
+    LABEL_INSTANCE,
+    LABEL_SCAN,
+    LABEL_CLAIM,
+    LABEL_MODE,
+)
+REHASH_MODE = "rehash"
 _FORMAT = "\t".join(f"{{{{.{f}}}}}" if "." not in f else f'{{{{.Label "{f}"}}}}' for f in _FIELDS)
 
 Decision = Literal["keep", "remove"]
@@ -79,6 +95,7 @@ class AnalyzerContainer:
     instance: str
     scan_id: UUID | None
     claim: str
+    mode: str = ""
 
 
 @dataclass(frozen=True)
@@ -142,7 +159,7 @@ def _default_runner(docker_path: str) -> DockerRunner:
             logger.warning("docker %s failed: %s", args[0], exc.__class__.__name__)
             return None, b""
         if done.returncode != 0 and done.stderr:
-            logger.warning("docker %s: %s", args[0], done.stderr[:500].decode("utf-8", "replace"))
+            logger.warning("docker %s: %s", args[0], printable_excerpt(done.stderr[:500]))
         return done.returncode, done.stdout[:_MAX_LIST_BYTES]
 
     return run
@@ -187,7 +204,7 @@ class OrphanReconciler:
             parts = line.split("\t")
             if len(parts) != len(_FIELDS):
                 continue
-            cid, name, state, role, instance, scan, claim = parts
+            cid, name, state, role, instance, scan, claim, mode = parts
             # Defense in depth: never trust the filter alone.
             if role != wanted_role or instance != self.instance or not cid:
                 continue
@@ -195,7 +212,7 @@ class OrphanReconciler:
                 scan_id: UUID | None = UUID(scan)
             except ValueError:
                 scan_id = None
-            found.append(AnalyzerContainer(cid, name, state, instance, scan_id, claim))
+            found.append(AnalyzerContainer(cid, name, state, instance, scan_id, claim, mode))
         return found
 
     @staticmethod
@@ -214,6 +231,36 @@ class OrphanReconciler:
             for sid, status, token, heartbeat, claimed in rows
         }
 
+    @staticmethod
+    def _verify_ownership(session: Session, tokens: Iterable[str]) -> dict[str, ScanOwnership]:
+        """Ownership of rehash containers, keyed by the verification job's claim token."""
+        wanted: list[UUID] = []
+        for token in set(tokens):
+            try:
+                wanted.append(UUID(token))
+            except ValueError:
+                continue
+        if not wanted:
+            return {}
+        rows = session.execute(
+            select(
+                VerificationRun.claim_token,
+                VerificationRun.status,
+                VerificationRun.heartbeat_at,
+                VerificationRun.started_at,
+            ).where(VerificationRun.claim_token.in_(wanted))
+        ).all()
+        session.rollback()
+        out: dict[str, ScanOwnership] = {}
+        for token, status, heartbeat, started in rows:
+            running = status == VerificationStatus.RUNNING.value
+            out[str(token)] = ScanOwnership(
+                ScanStatus.RUNNING if running else ScanStatus.COMPLETED,
+                token,
+                heartbeat or started,
+            )
+        return out
+
     def reconcile(self, session: Session) -> ReconcileReport:
         """One pass. Never raises for Docker problems; they are reported and logged."""
         report = ReconcileReport()
@@ -223,14 +270,24 @@ class OrphanReconciler:
             logger.warning("Orphan reconciliation skipped: Docker is not reachable")
             return report
         report.listed = len(containers)
-        scans = self._ownership(session, (c.scan_id for c in containers if c.scan_id))
+        scans = self._ownership(
+            session, (c.scan_id for c in containers if c.scan_id and c.mode != REHASH_MODE)
+        )
+        jobs = self._verify_ownership(
+            session, (c.claim for c in containers if c.mode == REHASH_MODE)
+        )
         now = utcnow()
         for container in containers:
             if container.scan_id is None:
                 # Our labels, but a malformed scan id: never created by this code. Leave it.
                 report.kept.append(container.container_id)
                 continue
-            verdict = decide(container, scans.get(container.scan_id), now, self.stale_seconds)
+            owner = (
+                jobs.get(container.claim)
+                if container.mode == REHASH_MODE
+                else scans.get(container.scan_id)
+            )
+            verdict = decide(container, owner, now, self.stale_seconds)
             if verdict == "keep":
                 report.kept.append(container.container_id)
                 continue

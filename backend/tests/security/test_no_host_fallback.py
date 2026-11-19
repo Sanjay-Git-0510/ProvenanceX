@@ -184,9 +184,11 @@ def test_worker_entry_points_refuse_to_run_on_the_host(tmp_path):
     request = WorkerRequest(mode="extract", kind="software", has_upload=True, limits=limits)
     for call in (
         lambda: collect.run_extract(request, zip_path, out),
-        lambda: collect.run_analyze(
-            request.model_copy(update={"mode": "analyze"}), out, None, out, sbom_out=out / "s"
+        lambda: collect.run_analyze(request.model_copy(update={"mode": "analyze"}), out, None, out),
+        lambda: collect.run_sbom(
+            request.model_copy(update={"mode": "sbom"}), out, out, sbom_out=out / "s"
         ),
+        lambda: collect.run_rehash(request.model_copy(update={"mode": "rehash"}), out),
         lambda: collect.run_persist(request.model_copy(update={"mode": "persist"}), out, out),
         lambda: collect.rehash_tree(request, out),
     ):
@@ -332,18 +334,22 @@ def _calls(path: Path) -> set[str]:
     return names
 
 
-# Reached only through the analyzer. verification.py's re-hash of the kept tree is a
-# documented exception until the verify job moves to the runner (Milestone C).
-_DOCUMENTED_EXCEPTIONS = {("blockchain/verification.py", "tree_digest")}
-
-
+# Reached only through the analyzer. Since Milestone C1 there are no exceptions: /verify
+# re-hashes the kept evidence in the runner's read-only `rehash` container (audit finding M5).
 def test_host_side_code_never_calls_content_functions():
-    host_dirs = ("api", "pipeline", "runner", "risk", "blockchain", "analysis")
+    host_dirs = ("api", "pipeline", "runner", "risk", "blockchain", "analysis", "verification")
     for directory in host_dirs:
         for path in sorted((APP / directory).glob("*.py")):
             rel = f"{directory}/{path.name}"
-            for name in _calls(path) & set(CONTENT_FUNCTIONS):
-                assert (rel, name) in _DOCUMENTED_EXCEPTIONS, f"{rel} calls {name} on the host"
+            assert not _calls(path) & set(CONTENT_FUNCTIONS), f"{rel} reads content on the host"
+
+
+def test_verification_and_api_never_import_hashing():
+    """The API and the verification code hold no file-hashing code at all."""
+    for rel in ("api/blockchain.py", "blockchain/verification.py", "verification/jobs.py"):
+        tree = ast.parse((APP / rel).read_text())
+        modules = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+        assert "app.core.hashing" not in modules, rel
 
 
 # --------------------------------------------------------------------------- records
@@ -352,7 +358,8 @@ def test_successful_scan_records_its_sandbox_runs(scan_client, test_settings):
     assert body["status"] == "completed", body["error"]
     runs = body["sandbox"]["runs"]
     # The in-process executor has no staging volume or holder; persist re-hashes the tree.
-    assert [r["mode"] for r in runs] == ["extract", "analyze", "persist"]
+    # Syft runs alone in the `sbom` container (audit finding M4).
+    assert [r["mode"] for r in runs] == ["extract", "analyze", "sbom", "persist"]
     assert all(r["status"] == "ok" and r["provider"] == "inprocess_test" for r in runs)
     # The test executor isolates nothing, and says so.
     assert all(r["runtime_verified"] is False for r in runs)

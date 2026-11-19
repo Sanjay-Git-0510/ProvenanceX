@@ -21,7 +21,14 @@ from app.analysis.framing import FrameDecoder, FrameError, write_frames
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.pipeline.workspace import MB
-from app.sandbox_worker.collect import rehash_tree, run_analyze, run_extract, section_error
+from app.sandbox_worker.collect import (
+    rehash_tree,
+    run_analyze,
+    run_extract,
+    run_rehash,
+    run_sbom,
+    section_error,
+)
 from app.sandbox_worker.protocol import RESULT_FORMAT, Mode
 from app.scanners.sbom.base import SbomProvider
 from app.scanners.sbom.syft import SyftProvider
@@ -68,7 +75,7 @@ class InProcessTestAnalyzer:
             "isolation": {},
         }
         ws = job.workspace
-        if mode == "analyze":
+        if mode == "sbom":
             job.sbom_path.unlink(missing_ok=True)
         with tempfile.TemporaryDirectory(prefix="px-scratch-") as scratch:
             sbom_tmp = Path(scratch) / "sbom.cdx.json"
@@ -77,26 +84,30 @@ class InProcessTestAnalyzer:
                     if mode == "extract":
                         run_extract(request, ws.upload_path, ws.src_dir)
                         out = {**base, "status": "ok"}
+                    elif mode == "sbom":
+                        sbom_run = run_sbom(
+                            request,
+                            ws.src_dir,
+                            Path(scratch),
+                            sbom_out=sbom_tmp,
+                            sbom_provider=self.sbom_provider,
+                        )
+                        out = {**base, "status": "ok", "sbom_run": sbom_run}
+                    elif mode == "rehash":
+                        out = {**base, "status": "ok", "rehash": run_rehash(request, ws.root)}
                     elif mode == "persist":
                         persisted = rehash_tree(request, ws.src_dir)
                         out = {**base, "status": "ok", "persisted": persisted}
                     else:
                         work = Path(scratch) / "work"
                         work.mkdir()
-                        analysis = run_analyze(
-                            request,
-                            ws.src_dir,
-                            ws.upload_path,
-                            work,
-                            sbom_out=sbom_tmp,
-                            sbom_provider=self.sbom_provider,
-                        )
+                        analysis = run_analyze(request, ws.src_dir, ws.upload_path, work)
                         out = {**base, "status": "ok", "analysis": analysis}
                 except Exception as exc:  # noqa: BLE001 - mirrors the container entry point
                     out = {**base, "status": "error", "error": section_error(exc)}
             framed = io.BytesIO()
             envelope = json.dumps(out, allow_nan=False).encode()
-            sbom_present = (out.get("analysis") or {}).get("sbom") is not None
+            sbom_present = (out.get("sbom_run") or {}).get("sbom") is not None
             if sbom_present and sbom_tmp.is_file():
                 with sbom_tmp.open("rb") as fh:
                     write_frames(framed, envelope, fh)
@@ -116,7 +127,7 @@ class InProcessTestAnalyzer:
         decoder = FrameDecoder(
             max_envelope=self.max_output,
             max_sbom=self.max_sbom,
-            open_sbom=open_sbom if mode == "analyze" and job.kind == "software" else None,
+            open_sbom=open_sbom if mode == "sbom" else None,
         )
         ok = False
         try:
@@ -138,7 +149,7 @@ class InProcessTestAnalyzer:
         finally:
             for handle in handles:
                 handle.close()
-            if not ok and mode == "analyze":
+            if not ok and mode == "sbom":
                 job.sbom_path.unlink(missing_ok=True)
         record = {"mode": mode, "provider": self.name, "runtime_verified": False}
         return AnalyzerRun(result=result, record=record)

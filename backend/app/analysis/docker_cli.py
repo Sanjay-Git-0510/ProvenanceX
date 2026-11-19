@@ -10,6 +10,8 @@ import os
 import subprocess
 from collections.abc import Callable
 
+from app.core.bounded import printable_excerpt
+
 logger = logging.getLogger(__name__)
 
 COMMAND_TIMEOUT_SECONDS = 30
@@ -46,7 +48,7 @@ def make_docker_runner(docker_path: str, timeout: float = COMMAND_TIMEOUT_SECOND
             logger.warning("docker %s failed: %s", args[:2], exc.__class__.__name__)
             return None, b""
         if done.returncode != 0 and done.stderr:
-            logger.warning("docker %s: %s", args[:2], done.stderr[:500].decode("utf-8", "replace"))
+            logger.warning("docker %s: %s", args[:2], printable_excerpt(done.stderr[:500]))
         return done.returncode, done.stdout[:MAX_OUTPUT_BYTES]
 
     return run

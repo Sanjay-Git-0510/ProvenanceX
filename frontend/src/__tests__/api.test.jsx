@@ -89,6 +89,13 @@ describe("endpoints", () => {
     expect(lastCall()[1].method).toBe("POST");
   });
 
+  it("reads a verification job and the history", async () => {
+    await api.getVerification(ID, "job-1");
+    expect(lastCall()[0]).toBe(`/api/v1/scans/${ID}/verifications/job-1`);
+    await api.listVerifications(ID, { limit: 5 });
+    expect(lastCall()[0]).toBe(`/api/v1/scans/${ID}/verifications?limit=5`);
+  });
+
   it("has no anchor call", () => {
     expect(Object.keys(api).filter((name) => /anchor/i.test(name))).toEqual([]);
   });

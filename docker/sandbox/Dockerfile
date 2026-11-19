@@ -15,10 +15,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends strace=6.1-0.1 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install setuptools==75.8.0
+    && printf '%s\n' \
+       "setuptools==75.8.0 --hash=sha256:e3982f444617239225d675215d51f6ba05f845d4eec313da4418fdbb56fb27e3" \
+       > /tmp/req.txt \
+    && pip install --require-hashes --no-deps -r /tmp/req.txt \
+    && rm /tmp/req.txt
 
 COPY supervisor.py /opt/px/supervisor.py
 RUN chmod 0555 /opt/px /opt/px/supervisor.py
+
+# I1: strip setuid/setgid bits (su, mount, passwd, ...); nothing here ever needs them.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && ! find / -xdev -perm /6000 -type f | grep -q .
 
 # The real uid comes from `docker run --user` and is never 0.
 USER 65534:65534

@@ -109,9 +109,19 @@ class Api:
         return response.json()
 
     def verify(self, scan_id: str) -> dict:
+        """POST /verify queues a job (Milestone C1); the scan runner answers it. Poll it."""
         response = self.client.post(f"/scans/{scan_id}/verify")
-        assert response.status_code == 200, response.text
-        return response.json()
+        assert response.status_code in (200, 202), response.text
+        job = response.json()
+        deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
+        while job["status"] in ("queued", "running"):
+            assert time.monotonic() < deadline, f"verification job {job['job_id']} did not finish"
+            time.sleep(1)
+            got = self.client.get(f"/scans/{scan_id}/verifications/{job['job_id']}")
+            assert got.status_code == 200, got.text
+            job = got.json()
+        assert job["status"] == "completed", job
+        return job["result"]
 
     def require_live_osv(self, scan_id: str) -> None:
         """An unavailable OSV is reported as "not run", so it can never count as a pass."""

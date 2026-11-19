@@ -101,6 +101,7 @@ def worker_output(
     error: dict | None = None,
     raw: bytes | None = None,
     persisted: dict | None = None,
+    rehash: dict | None = None,
     sbom: bytes | None = None,
     frame: bool = True,
 ) -> Path:
@@ -122,6 +123,11 @@ def worker_output(
             doc["analysis"] = analysis or minimal_analysis()
         if status == "ok" and mode == "persist":
             doc["persisted"] = persisted or minimal_analysis()["tree"]
+        if status == "ok" and mode == "rehash":
+            doc["rehash"] = rehash or {
+                name: {"status": "ok", "sha256": "b" * 64, "file_count": 1, "total_bytes": 3}
+                for name in ("artifact", "bom", "provenance")
+            }
         raw = json.dumps(doc).encode()
     if frame:
         buf = io.BytesIO()

@@ -46,14 +46,14 @@ def _spec(mode="analyze", mounts=None, uid=1000) -> AnalyzerSpec:
 
 def _refused(argv):
     with pytest.raises(AppError) as info:
-        assert_create_hardened(argv)
+        assert_create_hardened(argv, workspace_root="/ws")
     assert info.value.code == "sandbox_refused"
 
 
 @pytest.mark.parametrize("mode", ["analyze", "extract", "persist", "hold"])
 def test_built_command_passes(mode):
     argv = build_create_argv("docker", _spec(mode))
-    assert assert_create_hardened(argv) == mode
+    assert assert_create_hardened(argv, workspace_root="/ws") == mode
     assert "--network=none" in argv and "--read-only" in argv and "--cap-drop=ALL" in argv
 
 
@@ -62,7 +62,9 @@ def test_volume_mounts_pass():
         _staging("/artifact", True),
         MountSpec("volume", "px_ws", "/out/src", "src", False, SCAN),
     )
-    assert_create_hardened(build_create_argv("docker", _spec("persist", mounts=m)))
+    assert_create_hardened(
+        build_create_argv("docker", _spec("persist", mounts=m)), workspace_root="/ws"
+    )
 
 
 @pytest.mark.parametrize(

@@ -155,33 +155,77 @@ describe("useFindings", () => {
 
 describe("useVerification", () => {
   const answer = { state: "VERIFIED", reason: { code: "x", message: "y" }, fields: [] };
+  const JOB = "11111111-2222-3333-4444-555555555555";
+  const job = (status, result = null) => ({ job_id: JOB, scan_id: SCAN_ID, status, state: result?.state ?? null, result });
+  const done = job("completed", answer);
 
   it("is idle and sends nothing until asked", () => {
-    const fetchMock = mockApi([[/\/verify$/, answer]]);
+    const fetchMock = mockApi([[/\/verify$/, done]]);
     const { result } = renderHook(() => useVerification(SCAN_ID));
     expect(result.current.status).toBe("idle");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("reports the answer", async () => {
-    mockApi([[/\/verify$/, answer]]);
+  it("reports the answer of a job that finished at once", async () => {
+    mockApi([[/\/verify$/, done]]);
     const { result } = renderHook(() => useVerification(SCAN_ID));
     await act(() => result.current.verify());
     expect(result.current.status).toBe("done");
     expect(result.current.result.state).toBe("VERIFIED");
   });
 
+  it("polls a queued job until it finishes", async () => {
+    let polls = 0;
+    const fetchMock = mockApi([
+      [/\/verify$/, job("queued"), 202],
+      [/\/verifications\//, () => (++polls < 2 ? job("running") : done)],
+    ]);
+    const { result } = renderHook(() => useVerification(SCAN_ID, { pollMs: 5 }));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("done");
+    expect(result.current.result.state).toBe("VERIFIED");
+    expect(calledUrls(fetchMock).filter((u) => u.includes(`/verifications/${JOB}`))).toHaveLength(2);
+  });
+
+  it("shows a failed job as its UNKNOWN answer", async () => {
+    const unknown = { ...answer, state: "UNKNOWN", reason: { code: "verify_timeout", message: "late" } };
+    mockApi([[/\/verify$/, job("failed", unknown)]]);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("done");
+    expect(result.current.result.reason.code).toBe("verify_timeout");
+  });
+
+  it("stops waiting after the maximum and says so", async () => {
+    mockApi([
+      [/\/verify$/, job("queued"), 202],
+      [/\/verifications\//, job("queued")],
+    ]);
+    const { result } = renderHook(() => useVerification(SCAN_ID, { pollMs: 5, maxWaitMs: 20 }));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("failed");
+    expect(result.current.error.code).toBe("verify_wait_timeout");
+  });
+
+  it("treats a response that is not a job as a failed request", async () => {
+    mockApi([[/\/verify$/, answer]]);
+    const { result } = renderHook(() => useVerification(SCAN_ID));
+    await act(() => result.current.verify());
+    expect(result.current.status).toBe("failed");
+    expect(result.current.error.code).toBe("invalid_response");
+  });
+
   it("reports a failed request as failed, with no result", async () => {
-    mockApi([[/\/verify$/, { error: { code: "boom", message: "No" } }, 500]]);
+    mockApi([[/\/verify$/, { error: { code: "verify_queue_full", message: "Busy" } }, 429]]);
     const { result } = renderHook(() => useVerification(SCAN_ID));
     await act(() => result.current.verify());
     expect(result.current.status).toBe("failed");
     expect(result.current.result).toBeNull();
-    expect(result.current.error.code).toBe("boom");
+    expect(result.current.error.code).toBe("verify_queue_full");
   });
 
   it("forgets the result when the scan changes", async () => {
-    const fetchMock = mockApi([[/\/verify$/, answer]]);
+    const fetchMock = mockApi([[/\/verify$/, done]]);
     const { result, rerender } = renderHook(({ id }) => useVerification(id), { initialProps: { id: SCAN_ID } });
     await act(() => result.current.verify());
     rerender({ id: SCAN_B });
@@ -190,11 +234,26 @@ describe("useVerification", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("stops polling when the scan changes", async () => {
+    const fetchMock = mockApi([
+      [/\/verify$/, job("queued"), 202],
+      [/\/verifications\//, job("running")],
+    ]);
+    const { result, rerender } = renderHook(({ id }) => useVerification(id, { pollMs: 5 }), { initialProps: { id: SCAN_ID } });
+    act(() => { result.current.verify(); });
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    rerender({ id: SCAN_B });
+    const calls = fetchMock.mock.calls.length;
+    await act(() => new Promise((r) => setTimeout(r, 40)));
+    expect(fetchMock.mock.calls.length).toBe(calls);
+    expect(result.current.status).toBe("idle");
+  });
+
   it("drops a late answer for the previous scan", async () => {
     let release;
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) }); })),
+      vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(done) }); })),
     );
     const { result, rerender } = renderHook(({ id }) => useVerification(id), { initialProps: { id: SCAN_ID } });
     act(() => { result.current.verify(); });
@@ -205,7 +264,7 @@ describe("useVerification", () => {
 
   it("does not send a second request while one is running", async () => {
     let release;
-    const fetchMock = vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) }); }));
+    const fetchMock = vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(done) }); }));
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useVerification(SCAN_ID));
     act(() => { result.current.verify(); });

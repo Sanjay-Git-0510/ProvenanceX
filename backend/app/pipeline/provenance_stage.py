@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import evidence_files
 from app.db.models import (
     Artifact,
     Finding,
@@ -37,7 +38,7 @@ from app.provenance.checks import (
 )
 
 STAGE = "provenance"
-PROVENANCE_FILENAME = "provenance.json"
+PROVENANCE_FILENAME = evidence_files.PROVENANCE_FILENAME
 
 
 @dataclass

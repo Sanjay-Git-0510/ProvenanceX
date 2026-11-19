@@ -2,7 +2,8 @@
 # Ports are bound to 127.0.0.1 so nothing is exposed beyond the dev machine.
 services:
   postgres:
-    image: postgres:16
+    # Digest-pinned (audit finding M6). Update tag and digest together.
+    image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-provenancex}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-provenancex}
@@ -201,11 +202,13 @@ services:
       # Cap on the JSON envelope; the SBOM travels as its own frame (MAX_SBOM_MB) (audit M3).
       ANALYZER_MAX_OUTPUT_MB: ${ANALYZER_MAX_OUTPUT_MB:-12}
       ANALYZER_PERSIST_TIMEOUT_SECONDS: ${ANALYZER_PERSIST_TIMEOUT_SECONDS:-120}
+      # The separate Syft container (audit M4): Syft's own timeout plus start-up.
+      ANALYZER_SBOM_TIMEOUT_SECONDS: ${ANALYZER_SBOM_TIMEOUT_SECONDS:-360}
       ANALYZER_MAX_STDERR_KB: ${ANALYZER_MAX_STDERR_KB:-256}
       # Inside Compose the workspace is the named volume below, mounted into analyzer
       # containers with volume-subpath=<scan_id>/src.
       ANALYZER_WORKSPACE_MOUNT: volume
-      ANALYZER_WORKSPACE_VOLUME: ${ANALYZER_WORKSPACE_VOLUME:-provenancex_workspace}
+      ANALYZER_WORKSPACE_VOLUME: ${ANALYZER_WORKSPACE_VOLUME:-${COMPOSE_PROJECT_NAME}_workspace}
       # The API only queues; the scan-runner service runs scans.
       SCAN_DISPATCH: runner
       RUNNER_POLL_SECONDS: ${RUNNER_POLL_SECONDS:-2.0}
@@ -225,6 +228,11 @@ services:
       # failed by the runner itself, and the runner exits so Compose restarts it.
       RUNNER_WATCHDOG_GRACE_SECONDS: ${RUNNER_WATCHDOG_GRACE_SECONDS:-60}
       RUNNER_WATCHDOG_EXIT_SECONDS: ${RUNNER_WATCHDOG_EXIT_SECONDS:-30}
+      # Verification jobs (audit M5): POST /verify queues; the runner re-hashes in a read-only
+      # rehash container. Past VERIFY_MAX_PENDING queued jobs the API answers 429.
+      VERIFY_REHASH_TIMEOUT_SECONDS: ${VERIFY_REHASH_TIMEOUT_SECONDS:-300}
+      VERIFY_MAX_SECONDS: ${VERIFY_MAX_SECONDS:-600}
+      VERIFY_MAX_PENDING: ${VERIFY_MAX_PENDING:-50}
       # Kernel-capped staging (audit L1): one tmpfs volume of STAGING_MB per running scan, at
       # most STAGING_TOTAL_MB of them in RAM; a scan waits STAGING_WAIT_SECONDS for room.
       STAGING_MB: ${STAGING_MB:-512}
@@ -239,7 +247,7 @@ services:
       # internal fetch network, behind the egress proxy. There is no host-side download.
       FETCHER_PROVIDER: docker
       FETCHER_IMAGE: ${FETCHER_IMAGE:-provenancex-fetcher:0.1.0}
-      FETCHER_NETWORK: ${FETCHER_NETWORK:-provenancex_fetch}
+      FETCHER_NETWORK: ${FETCHER_NETWORK:-${COMPOSE_PROJECT_NAME}_fetch}
       FETCHER_PROXY_URL: http://egress-proxy:3128
       FETCHER_MEMORY_MB: ${FETCHER_MEMORY_MB:-1024}
       FETCHER_CPUS: ${FETCHER_CPUS:-1.0}
@@ -328,14 +336,15 @@ networks:
   # Internal: Docker gives it no route to the internet or to any other network. Fetcher
   # containers (attached by the runner) and the egress proxy are its only members.
   fetch:
-    name: ${FETCHER_NETWORK:-provenancex_fetch}
+    name: ${FETCHER_NETWORK:-${COMPOSE_PROJECT_NAME}_fetch}
     internal: true
   # The egress proxy's own way out. Nothing else is attached to it.
   egress:
-    name: ${EGRESS_NETWORK:-provenancex_egress}
+    name: ${EGRESS_NETWORK:-${COMPOSE_PROJECT_NAME}_egress}
 
 volumes:
   pgdata:
-  # Explicitly named, because analyzer containers mount it by name (volume-subpath).
+  # Explicitly named, because analyzer containers mount it by name (volume-subpath). The default
+  # is per Compose project (audit finding L9), so two projects never share a workspace.
   workspace:
-    name: ${ANALYZER_WORKSPACE_VOLUME:-provenancex_workspace}
+    name: ${ANALYZER_WORKSPACE_VOLUME:-${COMPOSE_PROJECT_NAME}_workspace}

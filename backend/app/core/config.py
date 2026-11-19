@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     # it: it is a separate frame capped by MAX_SBOM_MB and parsed in a child process.
     analyzer_max_output_mb: int = Field(default=12, gt=0, le=64)
     analyzer_persist_timeout_seconds: int = Field(default=120, gt=0)
+    # The separate Syft container (audit finding M4): Syft's own timeout plus start-up.
+    analyzer_sbom_timeout_seconds: int = Field(default=360, gt=0)
     analyzer_max_stderr_kb: int = Field(default=256, gt=0)
     # How the per-scan workspace reaches the analyzer: "bind" (the runner runs on the host,
     # WORKSPACE_ROOT is a host path) or "volume" (the runner runs in Compose and the
@@ -201,6 +203,15 @@ class Settings(BaseSettings):
     runner_watchdog_grace_seconds: int = Field(default=60, gt=0)
     runner_watchdog_exit_seconds: int = Field(default=30, gt=0)
 
+    # --- Verification jobs (Milestone C1, audit finding M5). POST /verify only queues a job;
+    # the scan-runner re-hashes the kept evidence in a read-only `rehash` analyzer container and
+    # compares it with the anchor and the chain. One active job per scan (database-enforced);
+    # beyond VERIFY_MAX_PENDING queued jobs the API answers 429. A job running longer than
+    # VERIFY_MAX_SECONDS, or whose heartbeat stops, is failed and answers UNKNOWN.
+    verify_rehash_timeout_seconds: int = Field(default=300, gt=0)
+    verify_max_seconds: int = Field(default=600, gt=0)
+    verify_max_pending: int = Field(default=50, gt=0, le=10000)
+
     # --- Blockchain (Phase 7). "disabled" is the default. "mock" is an in-memory ledger tagged
     # source="mock", and is never a fallback. "web3" accepts only a local chain.
     blockchain_provider: Literal["disabled", "web3", "mock"] = "disabled"
@@ -239,10 +250,21 @@ class Settings(BaseSettings):
                 self.fetch_timeout_seconds("huggingface"),
             )
             + self.analyzer_timeout_seconds
+            + self.analyzer_sbom_timeout_seconds
             + self.analyzer_persist_timeout_seconds
-            + 2 * self.analyzer_host_grace_seconds
+            + 3 * self.analyzer_host_grace_seconds
             + self.fetcher_host_grace_seconds
         )
+        if self.analyzer_sbom_timeout_seconds < self.syft_timeout_seconds + 30:
+            raise ValueError(
+                "ANALYZER_SBOM_TIMEOUT_SECONDS must exceed SYFT_TIMEOUT_SECONDS by at least 30s"
+            )
+        if self.verify_max_seconds < self.verify_rehash_timeout_seconds + 2 * (
+            self.analyzer_host_grace_seconds
+        ):
+            raise ValueError(
+                "VERIFY_MAX_SECONDS must cover VERIFY_REHASH_TIMEOUT_SECONDS plus its grace"
+            )
         if self.runner_max_scan_seconds < analyzer_budget:
             raise ValueError(
                 "RUNNER_MAX_SCAN_SECONDS must cover the fetch, analyzer and persist time limits "

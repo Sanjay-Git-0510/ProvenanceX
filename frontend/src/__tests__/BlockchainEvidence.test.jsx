@@ -62,9 +62,19 @@ const record = (overrides = {}) => ({
 
 afterEach(() => vi.unstubAllGlobals());
 
+// POST /verify answers with a job; a finished job carries the verification as its result.
+const finishedJob = (result) => ({
+  job_id: "11111111-2222-3333-4444-555555555555",
+  scan_id: SCAN_ID,
+  status: "completed",
+  state: result.state,
+  result,
+});
+
 function open({ verify = verification(), stored = record(), verifyStatus = 200 } = {}) {
+  const body = verifyStatus === 200 && typeof verify.state === "string" ? finishedJob(verify) : verify;
   const fetchMock = mockApi([
-    [/\/verify$/, verify, verifyStatus],
+    [/\/verify$/, body, verifyStatus],
     [/\/blockchain$/, { scan_id: SCAN_ID, anchor_recorded: !!stored, record: stored, note: "Stored data only." }],
     [/\/scans\?/, scanList([scanRow()])],
   ]);

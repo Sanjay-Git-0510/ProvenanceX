@@ -44,7 +44,7 @@ def test_alembic_upgrade_head(engine):
     head = ScriptDirectory.from_config(cfg).get_current_head()
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert head == "0008"  # bump when a new migration is added
+    assert head == "0009"  # bump when a new migration is added
     assert version == head
 
 

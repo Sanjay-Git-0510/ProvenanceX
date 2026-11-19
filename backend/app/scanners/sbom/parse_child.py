@@ -25,6 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
+from app.core.bounded import printable_excerpt
 from app.core.errors import AppError, ErrorCode
 from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom
 
@@ -174,7 +175,7 @@ def parse_sbom_isolated(
     if done.returncode == EXIT_MEMORY or (done.returncode < 0 and not done.stdout):
         raise _error("SBOM parsing exceeded its memory limit", {"memory_mb": memory_mb})
     if done.returncode not in (EXIT_OK, EXIT_REPORTED):
-        tail = done.stderr[-300:].decode("utf-8", "replace")
+        tail = printable_excerpt(done.stderr[-300:])
         raise _error("SBOM parser failed", {"exit_code": done.returncode, "stderr": tail})
     # The child's output is bounded by the component cap; refuse anything implausibly large.
     if len(done.stdout) > max(max_bytes * 2, 4 * MB):

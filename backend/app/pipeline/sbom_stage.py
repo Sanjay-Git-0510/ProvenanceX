@@ -18,6 +18,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
+from app.analysis.consistency import check_sbom_locations
+from app.core import evidence_files
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.db.models import Component, Scan
@@ -31,7 +33,7 @@ from app.scanners.sbom.parse_child import parse_sbom_isolated
 logger = logging.getLogger(__name__)
 
 STAGE = "sbom"
-SBOM_FILENAME = "sbom.cdx.json"
+SBOM_FILENAME = evidence_files.SBOM_FILENAME
 _PARSING_FILENAME = ".sbom-parsing.cdx.json"
 
 
@@ -76,7 +78,12 @@ def run_sbom_stage(
     settings: Settings,
     provider: SbomProvider,
     project_packages: Sequence[ProjectPackage] = (),
+    tree_files: Sequence[str] | None = None,
 ) -> SbomStageOutput | None:
+    """`tree_files`: the analyzed tree's file list. Real Syft component locations must lie in
+    it (audit finding M4); otherwise the stage fails with analyzer_output_invalid. Recorded
+    mock SBOMs (source="mock") describe a fixture, not this tree, so they are not checked."""
+
     def body(scan: Scan) -> tuple[SbomStageOutput, StageStatus, dict[str, Any]]:
         result = provider.generate(workspace.src_dir, workspace.root)
         max_bytes = settings.max_sbom_mb * MB
@@ -97,6 +104,10 @@ def run_sbom_stage(
                 memory_mb=settings.sbom_parse_memory_mb,
                 timeout_seconds=settings.sbom_parse_timeout_seconds,
             )
+            if tree_files is not None and result.source != "mock":
+                check_sbom_locations(
+                    (loc for comp in parsed.components for loc in comp.locations), tree_files
+                )
         except BaseException:
             parsing.unlink(missing_ok=True)
             raise

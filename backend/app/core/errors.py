@@ -50,6 +50,8 @@ class ErrorCode(StrEnum):
     ANALYZER_OUTPUT_INVALID = "analyzer_output_invalid"
     RUNNER_INTERRUPTED = "runner_interrupted"
     RUNNER_WATCHDOG_TIMEOUT = "runner_watchdog_timeout"
+    VERIFY_QUEUE_FULL = "verify_queue_full"
+    VERIFICATION_NOT_FOUND = "verification_not_found"
     FETCH_FAILED = "fetch_failed"
     FETCH_TIMEOUT = "fetch_timeout"
     FETCH_OUTPUT_INVALID = "fetch_output_invalid"

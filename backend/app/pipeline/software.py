@@ -18,7 +18,9 @@ Later phases add their steps after these.
 
 Sandbox-only processing: the download runs in the fetcher container and every step that reads
 artifact content (extraction, tree digest, manifest detection, Syft, static analysis, config
-digest, declared versions) runs in the analyzer container (app/pipeline/sandboxed.py). The
+digest, declared versions) runs in the analyzer container (app/pipeline/sandboxed.py); Syft runs
+alone in its own `sbom` container, and every section is cross-checked (app/analysis/consistency.py,
+audit finding M4). The
 runner never clones, downloads or parses the artifact; the stages here only store validated
 output. Without a working fetcher or analyzer the scan fails; there is no host fallback.
 
@@ -61,6 +63,7 @@ from app.pipeline.sandboxed import (
     analyze_tree,
     extract_upload,
     fetch_artifact,
+    generate_sbom,
     persist_tree,
     staging_area,
 )
@@ -231,6 +234,7 @@ def _ingest(
         if collected.tree.file_count == 0:
             raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
         tree = check_tree(collected, settings)
+        collected = generate_sbom(session, scan, analyzer, job, collected)
         persist_tree(session, scan, analyzer, job, settings, collected.tree)
 
     return IngestEvidence(
@@ -270,6 +274,7 @@ def _run_evidence_stages(
             collected.sbom_provider or settings.sbom_provider, collected, ingested.sbom_path
         ),
         ingested.evidence.project_packages,
+        tree_files=ingested.file_paths,
     )
     if sbom is None:
         skip_stage(session, scan_id, "graph", "sbom stage did not succeed")

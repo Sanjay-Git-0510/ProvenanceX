@@ -120,6 +120,13 @@ export const api = {
 
   getBlockchain: (scanId, { signal } = {}) => request(scanPath(scanId, "/blockchain"), { signal }),
 
+  // Queues a verification job (202), or returns the scan's active or finished job.
   verifyScan: (scanId, { signal } = {}) =>
     request(scanPath(scanId, "/verify"), { method: "POST", signal }),
+
+  getVerification: (scanId, jobId, { signal } = {}) =>
+    request(scanPath(scanId, `/verifications/${encodeURIComponent(jobId)}`), { signal }),
+
+  listVerifications: (scanId, { limit, offset, signal } = {}) =>
+    request(scanPath(scanId, `/verifications${query({ limit, offset })}`), { signal }),
 };

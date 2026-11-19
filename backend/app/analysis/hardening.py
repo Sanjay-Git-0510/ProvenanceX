@@ -33,8 +33,9 @@ TMPFS_OPTIONS = "rw,noexec,nosuid,nodev"
 ARTIFACT_DST = "/artifact"
 INPUT_DST = "/input"
 OUT_DST = "/out/src"
+EVIDENCE_DST = "/evidence"
 
-Mode = Literal["extract", "analyze", "persist", "hold"]
+Mode = Literal["extract", "analyze", "sbom", "persist", "rehash", "hold"]
 ENTRYPOINT = ["python", "-B", "-m", "app.sandbox_worker"]
 
 LABEL_ROLE = "io.provenancex.role"
@@ -49,9 +50,10 @@ LABEL_KEYS = (LABEL_ROLE, LABEL_INSTANCE, LABEL_SCAN, LABEL_CLAIM, LABEL_MODE)
 MAX_DEADLINE_SECONDS = 24 * 3600
 MAX_CPU_SECONDS = 10 * MAX_DEADLINE_SECONDS
 MountKind = Literal["bind", "volume"]
-Subdir = Literal["src", "input", "staging"]
+# "scan" is the scan's whole workspace directory (rehash only, always read-only).
+Subdir = Literal["src", "input", "staging", "scan"]
 
-_NAME_RE = re.compile(r"^px-ana-[0-9a-f-]{36}-(extract|analyze|persist|hold)$")
+_NAME_RE = re.compile(r"^px-ana-[0-9a-f-]{36}-(extract|analyze|sbom|persist|rehash|hold)$")
 _USER_RE = re.compile(r"^([1-9]\d*):([1-9]\d*)$")
 _MEMORY_RE = re.compile(r"^(\d+)m$")
 _TMPFS_RE = re.compile(rf"^/tmp:{TMPFS_OPTIONS},size=(\d+)m$")
@@ -60,6 +62,12 @@ _BIND_RE = re.compile(rf"^type=bind,src=(/[^,]+/({_UUID})/(src|input)),dst=([a-z
 _VOLUME_RE = re.compile(
     rf"^type=volume,src=([A-Za-z0-9][A-Za-z0-9_.-]*),dst=([a-z/]+),"
     rf"volume-subpath=({_UUID})/(src|input)(,readonly)?$"
+)
+# The whole scan workspace (rehash mode), bind or volume form. Read-only is enforced per mode.
+_SCAN_BIND_RE = re.compile(rf"^type=bind,src=(/[^,]+/({_UUID})),dst=([a-z/]+)(,readonly)?$")
+_SCAN_VOLUME_RE = re.compile(
+    rf"^type=volume,src=([A-Za-z0-9][A-Za-z0-9_.-]*),dst=([a-z/]+),"
+    rf"volume-subpath=({_UUID})(,readonly)?$"
 )
 # The scan's own tmpfs staging volume (app/analysis/staging.py), mounted whole, never copied
 # into from the image (volume-nocopy).
@@ -96,8 +104,12 @@ _REQUIRED_KEYS = frozenset({*_SINGLE_VALUED, *_VALUELESS, "--mount", "--label"})
 _MODE_MOUNTS: dict[str, dict[str, tuple[str, bool]]] = {
     "extract": {INPUT_DST: ("input", True), OUT_DST: ("staging", False)},
     "analyze": {ARTIFACT_DST: ("staging", True)},
+    # sbom (audit finding M4): Syft alone, on the read-only staging tree, nothing else mounted.
+    "sbom": {ARTIFACT_DST: ("staging", True)},
     "persist": {ARTIFACT_DST: ("staging", True), OUT_DST: ("src", False)},
     "hold": {ARTIFACT_DST: ("staging", True)},
+    # rehash (/verify, audit finding M5): the kept evidence, read-only; hashes bytes only.
+    "rehash": {EVIDENCE_DST: ("scan", True)},
 }
 _OPTIONAL_MOUNTS: dict[str, dict[str, tuple[str, bool]]] = {
     "analyze": {INPUT_DST: ("input", True)},
@@ -147,6 +159,11 @@ class MountSpec:
             return f"--mount=type=volume,src={self.source},dst={self.target},volume-nocopy{ro}"
         if self.kind == "bind":
             return f"--mount=type=bind,src={self.source},dst={self.target}{ro}"
+        if self.subdir == "scan":
+            return (
+                f"--mount=type=volume,src={self.source},dst={self.target},"
+                f"volume-subpath={self.scan_id}{ro}"
+            )
         return (
             f"--mount=type=volume,src={self.source},dst={self.target},"
             f"volume-subpath={self.scan_id}/{self.subdir}{ro}"
@@ -202,10 +219,14 @@ def resolve_workspace_dir(path: Path, workspace_base: Path, scan_id: UUID) -> tu
     if path.is_symlink():
         raise refuse("Analyzer mount source is a symlink")
     resolved = path.resolve()
-    if not resolved.is_dir() or resolved.parent.parent != base:
-        raise refuse("Analyzer mount source is outside the workspace")
-    if resolved.parent.name != str(scan_id) or resolved.name not in ("src", "input"):
-        raise refuse("Analyzer mount source is not this scan's workspace")
+    if resolved.parent == base:  # the scan's whole workspace (rehash)
+        if not resolved.is_dir() or resolved.name != str(scan_id):
+            raise refuse("Analyzer mount source is not this scan's workspace")
+    else:
+        if not resolved.is_dir() or resolved.parent.parent != base:
+            raise refuse("Analyzer mount source is outside the workspace")
+        if resolved.parent.name != str(scan_id) or resolved.name not in ("src", "input"):
+            raise refuse("Analyzer mount source is not this scan's workspace")
     if "," in str(resolved) or SOCKET_MARKER in str(resolved):
         raise refuse("Analyzer mount source has a disallowed path")
     info = resolved.stat()
@@ -263,14 +284,29 @@ def _parse_flags(argv: list[str]) -> tuple[dict[str, list[str]], list[str]]:
     return flags, argv[index:]
 
 
-def _parse_mount(value: str) -> tuple[str, str, bool, str]:
+def _bind_under_root(source: str, workspace_root: str | None, rel: str) -> None:
+    """A bind source must be exactly <WORKSPACE_ROOT>/<rel> (audit finding L4)."""
+    if workspace_root is None:
+        raise refuse("Bind mounts need the workspace root to be checked against")
+    root = workspace_root.rstrip("/")
+    if not root.startswith("/") or source != f"{root}/{rel}":
+        raise refuse("Analyzer bind mount is outside WORKSPACE_ROOT")
+
+
+def _parse_mount(value: str, workspace_root: str | None) -> tuple[str, str, bool, str]:
     """Return (destination, source kind, read-only, scan id) for an allowed mount value."""
     if m := _STAGING_RE.match(value):
         return m.group(2), "staging", m.group(3) is not None, m.group(1)
     if m := _BIND_RE.match(value):
+        _bind_under_root(m.group(1), workspace_root, f"{m.group(2)}/{m.group(3)}")
         return m.group(4), m.group(3), m.group(5) is not None, m.group(2)
     if m := _VOLUME_RE.match(value):
         return m.group(2), m.group(4), m.group(5) is not None, m.group(3)
+    if m := _SCAN_BIND_RE.match(value):
+        _bind_under_root(m.group(1), workspace_root, m.group(2))
+        return m.group(3), "scan", m.group(4) is not None, m.group(2)
+    if m := _SCAN_VOLUME_RE.match(value):
+        return m.group(2), "scan", m.group(4) is not None, m.group(3)
     raise refuse("Only per-scan workspace and staging mounts are allowed")
 
 
@@ -299,8 +335,12 @@ def _parse_labels(values: list[str]) -> dict[str, str]:
     return labels
 
 
-def assert_create_hardened(argv: list[str]) -> Mode:
-    """Raise sandbox_refused unless `argv` has exactly the required restrictions."""
+def assert_create_hardened(argv: list[str], *, workspace_root: str | None = None) -> Mode:
+    """Raise sandbox_refused unless `argv` has exactly the required restrictions.
+
+    `workspace_root` is the resolved WORKSPACE_ROOT; every bind source must sit directly under
+    it (audit finding L4). Without it, any bind mount is refused.
+    """
     if any(SOCKET_MARKER in token for token in argv):
         raise refuse("The Docker socket must never be mounted")
     flags, rest = _parse_flags(argv)
@@ -354,7 +394,7 @@ def assert_create_hardened(argv: list[str]) -> Mode:
     allowed = {**required, **_OPTIONAL_MOUNTS.get(mode, {})}
     seen: set[str] = set()
     for value in flags["--mount"]:
-        dst, subdir, read_only, mount_scan = _parse_mount(value)
+        dst, subdir, read_only, mount_scan = _parse_mount(value, workspace_root)
         if mount_scan != scan_in_name:
             raise refuse("Analyzer mount belongs to another scan", {"target": dst})
         if dst in seen or dst not in allowed:
@@ -374,7 +414,12 @@ def expected_mounts(mounts: tuple["MountSpec", ...]) -> set[MountTuple]:
     out = set()
     for m in mounts:
         staging = m.subdir == "staging"
-        subpath = f"{m.scan_id}/{m.subdir}" if m.kind == "volume" and not staging else ""
+        if m.kind != "volume" or staging:
+            subpath = ""
+        elif m.subdir == "scan":
+            subpath = str(m.scan_id)
+        else:
+            subpath = f"{m.scan_id}/{m.subdir}"
         out.add((m.kind, m.source, m.target, m.read_only, subpath, staging))
     return out
 

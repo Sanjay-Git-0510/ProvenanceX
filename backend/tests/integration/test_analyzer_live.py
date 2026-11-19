@@ -74,17 +74,21 @@ def test_benign_upload_is_extracted_and_analyzed_in_isolation(tmp_path):
     with staged(settings, _job(settings, zip_dir(SIMPLE_PROJECT))) as job:
         extract = analyzer.run(job, "extract")
         analyze = analyzer.run(job, "analyze")
+        sbom_run = analyzer.run(job, "sbom")
         persist = analyzer.run(job, "persist")
-    for run in (extract, analyze, persist):
+    for run in (extract, analyze, sbom_run, persist):
         assert run.result.status == "ok"
         assert run.result.isolation == ISOLATED  # what the kernel granted, seen from inside
         assert run.record["runtime_verified"] is True  # what docker inspect reported
         assert run.record["runtime"]["network"] == "none"
     a = analyze.analysis
     assert a.tree.sha256 == tree_digest(SIMPLE_PROJECT).sha256
-    assert a.sbom is not None and a.sbom.tool_name == "syft" and a.sbom.source == "syft"
+    # Syft runs alone in the sbom container (audit M4), never in analyze.
+    sbom = sbom_run.result.sbom_run.sbom
+    assert a.sbom is None and sbom is not None and sbom.tool_name == "syft"
+    assert sbom.source == "syft" and sbom_run.result.sbom_run.tree == a.tree
     # The SBOM arrived as its own frame and matches its description (audit M3).
-    assert job.sbom_path.stat().st_size == a.sbom.size
+    assert job.sbom_path.stat().st_size == sbom.size
     # The persisted copy is exactly the analyzed tree (transfer integrity).
     assert persist.result.persisted.sha256 == a.tree.sha256
     assert tree_digest(job.workspace.src_dir).sha256 == a.tree.sha256
@@ -139,7 +143,7 @@ def test_full_software_scan_through_the_real_sandbox(
     assert body["status"] == "completed", body["error"]
     assert body["artifact"]["sha256"] == tree_digest(SIMPLE_PROJECT).sha256
     runs = body["sandbox"]["runs"]
-    assert [r["mode"] for r in runs] == ["hold", "extract", "analyze", "persist"]
+    assert [r["mode"] for r in runs] == ["hold", "extract", "analyze", "sbom", "persist"]
     assert all(r["runtime_verified"] for r in runs)
     assert all(r["isolation"] == ISOLATED for r in runs if r["mode"] != "hold")
     assert runs[0]["staging"]["type"] == "tmpfs"

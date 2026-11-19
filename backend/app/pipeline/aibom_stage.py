@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.analysis.base import section_to_error
 from app.analysis.codec import model_analysis_from_aibom
+from app.core import evidence_files
 from app.core.errors import AppError, ErrorCode
 from app.db.models import Component, Finding, FindingCategory, Scan
 from app.graph.lineage_graph import package_key
@@ -39,7 +40,7 @@ from app.scanners.model.inventory import InventoryFile
 from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom
 
 STAGE = "aibom"
-AIBOM_FILENAME = "aibom.json"
+AIBOM_FILENAME = evidence_files.AIBOM_FILENAME
 RULE_SOURCE = "provenancex_rule"
 
 

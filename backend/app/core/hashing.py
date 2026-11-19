@@ -12,8 +12,14 @@ Tree digest format (``provenancex-tree-v1``):
 - A top-level ``.git`` directory is excluded.
 - The format is unambiguous: paths cannot contain NUL, and the hash has a fixed length.
 - Symlinks and special files are rejected rather than followed.
+
+Files are opened with O_NOFOLLOW and checked with fstat on the open descriptor, and a file
+listed by the tree walk must still be the same inode when it is opened (audit finding M5). A path
+swapped for a symlink, FIFO or another file between listing and reading is therefore refused as
+unsafe content, never followed.
 """
 
+import errno
 import hashlib
 import os
 import stat
@@ -38,17 +44,46 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def sha256_file(path: Path) -> str:
-    """Stream a file through SHA-256 without loading it into memory."""
+def _unsafe(message: str, rel: str) -> AppError:
+    return AppError(ErrorCode.UNSAFE_CONTENT, message, 400, {"path": rel})
+
+
+_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)  # a FIFO swapped in must not block the open
+    | getattr(os, "O_CLOEXEC", 0)
+)
+
+
+def open_regular(path: Path, expect: os.stat_result | None = None) -> tuple[int, os.stat_result]:
+    """Open `path` without following a symlink; return (fd, fstat) of a regular file only.
+
+    With `expect` (an earlier lstat), the opened file must be that same inode. Raises
+    unsafe_content otherwise; other OSErrors (missing, permission) propagate unchanged.
+    """
+    try:
+        fd = os.open(path, _OPEN_FLAGS)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            raise _unsafe("Symlinks are not allowed", path.name) from exc
+        raise
+    info = os.fstat(fd)
+    same = expect is None or (info.st_dev, info.st_ino) == (expect.st_dev, expect.st_ino)
+    if not stat.S_ISREG(info.st_mode) or not same:
+        os.close(fd)
+        raise _unsafe("The file was replaced or is not a regular file", path.name)
+    return fd, info
+
+
+def sha256_file(path: Path, expect: os.stat_result | None = None) -> str:
+    """Stream a regular file through SHA-256 without loading it into memory (see open_regular)."""
+    fd, _ = open_regular(path, expect)
     digest = hashlib.sha256()
-    with path.open("rb") as fh:
+    with os.fdopen(fd, "rb") as fh:
         while chunk := fh.read(CHUNK_SIZE):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _unsafe(message: str, rel: str) -> AppError:
-    return AppError(ErrorCode.UNSAFE_CONTENT, message, 400, {"path": rel})
 
 
 def list_tree_files(
@@ -58,7 +93,19 @@ def list_tree_files(
     max_files: int | None = None,
 ) -> list[tuple[bytes, Path]]:
     """Return (relative path bytes, absolute path) for every regular file, sorted."""
-    entries: list[tuple[bytes, Path]] = []
+    return [
+        (rel, path)
+        for rel, path, _ in _walk(root, excluded_top_level=excluded_top_level, max_files=max_files)
+    ]
+
+
+def _walk(
+    root: Path,
+    *,
+    excluded_top_level: frozenset[str],
+    max_files: int | None,
+) -> list[tuple[bytes, Path, os.stat_result]]:
+    entries: list[tuple[bytes, Path, os.stat_result]] = []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         current = Path(dirpath)
         kept: list[str] = []
@@ -74,12 +121,12 @@ def list_tree_files(
         for name in filenames:
             path = current / name
             rel = path.relative_to(root).as_posix()
-            mode = path.lstat().st_mode
-            if stat.S_ISLNK(mode):
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
                 raise _unsafe("Symlinks are not allowed", rel)
-            if not stat.S_ISREG(mode):
+            if not stat.S_ISREG(info.st_mode):
                 raise _unsafe("Special files are not allowed", rel)
-            entries.append((os.fsencode(rel), path))
+            entries.append((os.fsencode(rel), path, info))
             if max_files is not None and len(entries) > max_files:
                 raise AppError(
                     ErrorCode.TOO_MANY_FILES,
@@ -96,12 +143,29 @@ def tree_digest(
     *,
     excluded_top_level: frozenset[str] = DEFAULT_EXCLUDED_TOP_LEVEL,
     max_files: int | None = None,
+    max_bytes: int | None = None,
 ) -> TreeDigest:
-    """Compute the provenancex-tree-v1 digest of `root` (see module docstring)."""
+    """Compute the provenancex-tree-v1 digest of `root` (see module docstring).
+
+    `max_bytes` caps the total size listed (artifact_too_large), checked before any file is read.
+    """
     digest = hashlib.sha256(f"{TREE_DIGEST_VERSION}\n".encode())
+    files = _walk(root, excluded_top_level=excluded_top_level, max_files=max_files)
+    listed = sum(info.st_size for _, _, info in files)
+    if max_bytes is not None and listed > max_bytes:
+        raise AppError(
+            ErrorCode.ARTIFACT_TOO_LARGE,
+            "Artifact exceeds the size limit",
+            413,
+            {"max_bytes": max_bytes},
+        )
     total = 0
-    files = list_tree_files(root, excluded_top_level=excluded_top_level, max_files=max_files)
-    for rel, path in files:
-        digest.update(rel + b"\0" + sha256_file(path).encode("ascii") + b"\n")
-        total += path.stat().st_size
+    for rel, path, info in files:
+        fd, opened = open_regular(path, info)
+        file_digest = hashlib.sha256()
+        with os.fdopen(fd, "rb") as fh:
+            while chunk := fh.read(CHUNK_SIZE):
+                file_digest.update(chunk)
+        digest.update(rel + b"\0" + file_digest.hexdigest().encode("ascii") + b"\n")
+        total += opened.st_size
     return TreeDigest(sha256=digest.hexdigest(), file_count=len(files), total_bytes=total)

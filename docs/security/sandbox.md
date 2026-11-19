@@ -1,9 +1,10 @@
 # Sandbox-only scanning
 
-_Status: master-prompt Phase 1, Milestones A and A.1 (2026-11-18/19) and B (2026-11-19, awaiting
-review). Downloads now run in an isolated fetcher container behind an egress proxy, and every
-artifact tree lives in a kernel-capped tmpfs staging volume: see [fetcher.md](fetcher.md).
-Milestone C is not started. See "Not yet sandboxed" below._
+_Status: master-prompt Phase 1, Milestones A and A.1 (2026-11-18/19), B and C (2026-11-19, C
+awaiting review). Downloads run in an isolated fetcher container behind an egress proxy, every
+artifact tree lives in a kernel-capped tmpfs staging volume ([fetcher.md](fetcher.md)), `/verify`
+re-hashes in a runner-side `rehash` container, Syft runs alone in an `sbom` container and every
+analyzer result is cross-checked ([verification.md](verification.md)). See "Not yet sandboxed"._
 
 ## The rule
 
@@ -14,15 +15,16 @@ Every step that reads untrusted artifact content runs in a disposable **analyzer
 | GitHub clone, Hugging Face download | fetcher container, behind the egress proxy ([fetcher.md](fetcher.md)) |
 | ZIP extraction (traversal, absolute-path, symlink, bomb, size and file-count checks) | analyzer, `extract` mode, into the kernel-capped staging volume |
 | Copy of the analyzed tree into the persistent workspace (for `/verify`) | analyzer, `persist` mode |
+| `/verify` re-hash of the kept evidence | analyzer, `rehash` mode (scan workspace read-only), started by the runner |
 | Tree SHA-256 (`provenancex-tree-v1`), file list | analyzer, `analyze` mode |
 | Manifest and project-package detection | analyzer |
-| Syft SBOM generation | analyzer (Syft 1.57.0, checksum-pinned in the image) |
+| Syft SBOM generation | analyzer, `sbom` mode, alone (Syft 1.57.0, checksum-pinned in the image) |
 | AI-BOM: inventory, pickle opcode scan, safetensors header, configs, model card, custom code | analyzer |
 | Static analysis | analyzer |
 | Config digest and declared versions (risk inputs) | analyzer |
 
 The API and the scan runner only orchestrate. They hash raw upload bytes, validate the
-analyzer's JSON, and store it. There is **no disabled mode and no host fallback**. If the analyzer
+analyzer's JSON, cross-check it (`app/analysis/consistency.py`), and store it. There is **no disabled mode and no host fallback**. If the analyzer
 cannot run, the scan is marked `failed` with `sandbox_unavailable`, nothing is processed, and the
 reason is shown in the API and the UI.
 
@@ -38,7 +40,8 @@ Frontend -> API (queues only; no Docker, no socket)
           analyzer container (per scan, per mode; --rm'd in `finally`)
               |  one JSON document on stdout
               v
-          scan-runner: size cap -> strict JSON -> Pydantic schema -> typed decode -> Postgres
+          scan-runner: size cap -> strict JSON -> Pydantic schema -> typed decode
+                       -> contradiction checks (M4) -> Postgres
 ```
 
 ## Isolation controls, and how each is checked
@@ -54,7 +57,7 @@ Frontend -> API (queues only; no Docker, no socket)
 | Memory, no swap | `--memory=N --memory-swap=N` | `Memory == MemorySwap == N` | (OOM kill is reported) |
 | CPU, pids | `--cpus`, `--pids-limit` | `NanoCpus`, `PidsLimit` | |
 | Temp storage | `/tmp` tmpfs `noexec,nosuid,nodev,size=` | `Tmpfs` | |
-| Mounts | staging volume read-only for `analyze`/`persist`/`hold`; `extract` writes only staging; `persist` writes only `src` | exact mount set, modes, subpaths, `volume-nocopy` | |
+| Mounts | staging volume read-only for `analyze`/`sbom`/`persist`/`hold`; `extract` writes only staging; `persist` writes only `src`; `rehash` mounts only the scan workspace, read-only; bind sources exactly under `WORKSPACE_ROOT` (L4) | exact mount set, modes, subpaths, `volume-nocopy` | |
 | Hardening details (L3) | defaults kept | runtime `runc`, OOM killer on, `/dev/shm` ≤ 64 MiB, masked/read-only paths, `core=0` ulimit only, private cgroupns, no unconfined seccomp/AppArmor/SELinux, no sysctls/devices/ports/DNS, entrypoint | `Seccomp: 2` (`seccomp_filtered`), no secret-like env |
 | No IPC/PID/UTS/userns sharing, no devices | `--ipc=none` and nothing else allowed | `IpcMode`, `PidMode`, `UTSMode`, `UsernsMode`, `Devices`, `Binds` | |
 | No secrets | no `--env`, request on stdin | `Config.Env` has no secret-like names | |
@@ -179,15 +182,15 @@ self-check results, exit code, OOM and timeout flags, and duration. Failed runs 
 | `tests/integration/test_runner_kill_live.py` | SIGKILL of a runner mid-analysis on real Docker: the container outlives it, stops at its own deadline, restart recovery removes it and the workspace, other deployments' and unlabelled containers survive, a repeat pass is harmless | `PROVENANCEX_SANDBOX_TESTS=1 pytest tests/integration/test_runner_kill_live.py` |
 | `tests/integration/test_analyzer_live.py` | The real image: isolation self-check, traversal, absolute paths, symlinks, bombs, full software and model scans, no leftover containers | `PROVENANCEX_SANDBOX_TESTS=1 pytest tests/integration/test_analyzer_live.py` |
 | Milestone B suites | Fetcher, egress proxy, staging, watchdog, L2/L3/M3: see the table in [fetcher.md](fetcher.md#tests) | see fetcher.md |
+| Milestone C suites | Verify jobs, rehash, evidence consistency, supply chain: see [verification.md](verification.md#tests) | see verification.md |
 
 ## Not yet sandboxed (tracked)
 
 - ~~Downloads~~: done in Milestone B. They run in the fetcher container behind the egress proxy,
   and the runner has no git and no download path ([fetcher.md](fetcher.md)).
-- **`POST /scans/{id}/verify`** re-hashes the kept tree in the API process
-  (`app/blockchain/verification.py`, `tree_digest`). This reads file bytes with `lstat` and rejects
-  symlinks and special files, but it is still a host read of untrusted files. It is the one
-  documented exception in `test_host_side_code_never_calls_content_functions`.
+- ~~`POST /scans/{id}/verify`~~: done in Milestone C1. The API only queues a job; the runner
+  re-hashes in a read-only `rehash` container ([verification.md](verification.md)).
+  `test_host_side_code_never_calls_content_functions` now has no exceptions.
 - **Behavioral (dynamic) analysis** (`SANDBOX_PROVIDER`) is a separate, optional evidence layer. It
   supports only bind mounts, so it stays `disabled` in Compose for now. Turning it off does not
   disable the analyzer.

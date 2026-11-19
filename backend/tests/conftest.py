@@ -286,3 +286,12 @@ def write_scan_evidence(session, scan_id, settings, *, bom=True, provenance=True
         scan.provenance.record_sha256 = sha256_file(workspace.root / "provenance.json")
     session.commit()
     return workspace
+
+
+def rehash_source(settings):
+    """The digest source /verify uses, backed by the pytest-only in-process rehash worker."""
+    from app.analysis.inprocess import InProcessTestAnalyzer
+    from app.verification.executor import rehash_digests
+
+    analyzer = InProcessTestAnalyzer(settings)
+    return lambda scan: rehash_digests(analyzer, scan, settings, [])

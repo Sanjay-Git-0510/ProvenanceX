@@ -9,12 +9,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
+from app.core.bounded import BoundedDetails
 from app.sandbox_worker.exitcodes import EXIT_CPU_LIMIT, EXIT_DEADLINE  # noqa: F401 - re-export
 
 REQUEST_FORMAT = "provenancex-analyzer-request-v1"
 RESULT_FORMAT = "provenancex-analyzer-result-v1"
 
-Mode = Literal["extract", "analyze", "persist"]
+Mode = Literal["extract", "analyze", "sbom", "persist", "rehash"]
 Kind = Literal["software", "model"]
 
 _HEX64 = r"^[0-9a-f]{64}$"
@@ -79,7 +80,8 @@ class WorkerRequest(_Strict):
 class SectionError(_Strict):
     code: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
     message: str = Field(max_length=2000)
-    details: Any = None
+    # Small plain JSON only (audit finding L5): it is stored on the scan and shown by the API.
+    details: BoundedDetails = None
 
 
 class TreeOut(_Strict):
@@ -115,6 +117,22 @@ class SbomOut(_Strict):
     format: str = Field(max_length=64)
 
 
+class SbomRunOut(_Strict):
+    """sbom mode (audit finding M4): Syft runs alone in its own container. It also reports its
+    own digest of the tree it scanned, which the runner requires to equal the analysis's."""
+
+    tree: TreeOut
+    sbom_provider: str = Field(max_length=32)
+    sbom: SbomOut | None = None
+    sbom_error: SectionError | None = None
+
+    @model_validator(mode="after")
+    def _one_outcome(self) -> "SbomRunOut":
+        if (self.sbom is None) == (self.sbom_error is None):
+            raise ValueError("an SBOM run carries exactly one of an SBOM or an error")
+        return self
+
+
 class AnalysisOut(_Strict):
     tree: TreeOut
     file_paths: list[str] = Field(max_length=MAX_LIST)
@@ -142,6 +160,34 @@ class AnalysisOut(_Strict):
         return self
 
 
+class DigestOut(_Strict):
+    """One recomputed digest for /verify. `sha256` is present exactly when status is "ok".
+
+    missing: the file or tree does not exist. invalid: it was replaced by a symlink or special
+    file (counts as changed). unavailable: it exists but could not be hashed (too large, too
+    many files, unreadable).
+    """
+
+    status: Literal["ok", "missing", "invalid", "unavailable"]
+    sha256: str | None = Field(default=None, pattern=_HEX64)
+    file_count: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _digest_iff_ok(self) -> "DigestOut":
+        if (self.status == "ok") != (self.sha256 is not None):
+            raise ValueError("a digest is present exactly when status is ok")
+        return self
+
+
+class RehashOut(_Strict):
+    """rehash mode: fresh digests of the kept evidence. Only bytes were hashed; nothing parsed."""
+
+    artifact: DigestOut
+    bom: DigestOut
+    provenance: DigestOut
+
+
 class WorkerResult(_Strict):
     format: Literal["provenancex-analyzer-result-v1"] = RESULT_FORMAT
     mode: Mode
@@ -154,11 +200,16 @@ class WorkerResult(_Strict):
     # persist mode: the digest of the tree as written to the persistent workspace. The runner
     # requires it to equal the analyzed tree's digest (transfer integrity).
     persisted: TreeOut | None = None
+    # rehash mode: the digests /verify compares with the anchor.
+    rehash: RehashOut | None = None
+    # sbom mode: the SBOM description (the SBOM itself is its own frame) and the tree digest.
+    sbom_run: SbomRunOut | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "WorkerResult":
         if self.status == "error":
-            if self.error is None or self.analysis is not None or self.persisted is not None:
+            carries = (self.analysis, self.persisted, self.rehash, self.sbom_run)
+            if self.error is None or any(part is not None for part in carries):
                 raise ValueError("an error result carries exactly one error and no analysis")
         else:
             if self.error is not None:
@@ -167,4 +218,12 @@ class WorkerResult(_Strict):
                 raise ValueError("only an ok analyze result carries an analysis")
             if (self.mode == "persist") != (self.persisted is not None):
                 raise ValueError("only an ok persist result carries the persisted tree")
+            if (self.mode == "rehash") != (self.rehash is not None):
+                raise ValueError("only an ok rehash result carries the digests")
+            if (self.mode == "sbom") != (self.sbom_run is not None):
+                raise ValueError("only an ok sbom result carries the SBOM run")
+            if self.analysis is not None and (
+                self.analysis.sbom is not None or self.analysis.sbom_error is not None
+            ):
+                raise ValueError("the analyze container never produces an SBOM")
         return self

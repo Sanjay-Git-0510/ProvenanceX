@@ -53,4 +53,5 @@ def test_api_container_gets_no_docker_socket():
 
 def test_image_installs_the_pinned_ml_packages():
     dockerfile = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
-    assert "-r requirements-ml.txt" in dockerfile
+    # The hash-locked ML pins (audit M6), resolved from requirements-ml.txt by `make lock`.
+    assert "-r requirements-ml.lock" in dockerfile

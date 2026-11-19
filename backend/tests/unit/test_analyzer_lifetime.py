@@ -53,7 +53,7 @@ def _spec(claim="none", instance="px_ws") -> AnalyzerSpec:
 
 def _refused(argv):
     with pytest.raises(AppError) as info:
-        assert_create_hardened(argv)
+        assert_create_hardened(argv, workspace_root="/ws")
     assert info.value.code == "sandbox_refused"
 
 
@@ -61,7 +61,7 @@ def _refused(argv):
 def test_command_carries_labels_deadline_and_cpu_limit():
     token = str(uuid.uuid4())
     argv = build_create_argv("docker", _spec(claim=token))
-    assert assert_create_hardened(argv) == "analyze"
+    assert assert_create_hardened(argv, workspace_root="/ws") == "analyze"
     assert f"--label={LABEL_SCAN}={SCAN}" in argv
     assert f"--label={LABEL_CLAIM}={token}" in argv
     assert f"--label={LABEL_INSTANCE}=px_ws" in argv
@@ -279,8 +279,9 @@ class FakeDockerCli:
         raise AssertionError(args)
 
 
-def _line(cid, scan, claim, instance="px_ws", role="analyzer", state="running"):
-    return "\t".join([cid, f"px-ana-{scan}-analyze", state, role, instance, str(scan), claim])
+def _line(cid, scan, claim, instance="px_ws", role="analyzer", state="running", mode="analyze"):
+    name = f"px-ana-{scan}-{mode}"
+    return "\t".join([cid, name, state, role, instance, str(scan), claim, mode])
 
 
 def _scan_row(session, status=ScanStatus.RUNNING, token=None, heartbeat=None):

@@ -184,7 +184,9 @@ Saved models must be loaded with the library versions in their manifest. Compose
 | GET | `/api/v1/scans/{scan_id}/evidence` | Bounded, sanitized evidence summary: stage statuses and reasons, feature vector with null reasons, finding and component summaries with sources, provenance record, hashes, model version, mock flags and the synthetic-training label. Pages with `findings_limit`/`findings_offset` and `components_limit`/`components_offset` (at most 200 per page). Contains no file contents, raw SBOMs or traces |
 | POST | `/api/v1/scans/{scan_id}/anchor` | Anchor a completed scan on the local chain, once. Returns a structured error and sends nothing if it is refused |
 | GET | `/api/v1/scans/{scan_id}/blockchain` | The stored anchor record. Makes no verification claim |
-| POST | `/api/v1/scans/{scan_id}/verify` | Recompute the evidence and compare it with the anchor and the chain. Returns `VERIFIED`, `MISMATCH`, `NOT ANCHORED` or `UNKNOWN` with a reason and the values for each field |
+| POST | `/api/v1/scans/{scan_id}/verify` | Queue a verification job (202; the scan's active job is reused; 429 when too many are waiting). The scan runner re-hashes the evidence in an isolated container and compares it with the anchor and the chain. A scan that can never be anchored is answered at once (200, `NOT ANCHORED`) |
+| GET | `/api/v1/scans/{scan_id}/verifications/{job_id}` | The job; once finished, its `state` (`VERIFIED`, `MISMATCH`, `NOT ANCHORED` or `UNKNOWN`) and `result` with a reason and the values for each field |
+| GET | `/api/v1/scans/{scan_id}/verifications` | Verification history, newest first |
 
 Every error uses the envelope `{"error": {"code", "message", "details"}}`.
 
@@ -333,8 +335,12 @@ git-ignored `.env`, then restart the API.
 ```bash
 curl -X POST http://localhost:8000/api/v1/scans/<scan_id>/anchor   # a scan can be anchored once
 curl http://localhost:8000/api/v1/scans/<scan_id>/blockchain       # stored data, no verification claim
-curl -X POST http://localhost:8000/api/v1/scans/<scan_id>/verify   # recompute and compare
+curl -X POST http://localhost:8000/api/v1/scans/<scan_id>/verify   # queues a job: note job_id
+curl http://localhost:8000/api/v1/scans/<scan_id>/verifications/<job_id>  # poll until finished
 ```
+
+Verification needs the scan runner: it re-hashes the kept evidence in a read-only `rehash` analyzer
+container ([docs/security/verification.md](docs/security/verification.md)).
 
 Set `BLOCKCHAIN_ANCHOR_ON_SCAN=true` to anchor each completed scan automatically. It is off by default.
 
@@ -413,9 +419,12 @@ A pass is not a statement that an artifact is safe: read the not-evaluated layer
 - The `hash_consistency_failed` BLOCK needs a source URL, so it cannot fire through an upload. It has unit tests only.
 - The demo's frontend image runs the Vite dev server. There is no production frontend image.
 - The optional behavioral sandbox needs the scan runner on the host (bind mounts). Do not run real malware through it.
-- `POST /verify`'s re-hash still runs outside the analyzer sandbox; see "Not yet sandboxed" in
-  [docs/security/sandbox.md](docs/security/sandbox.md). Downloads are isolated since Milestone B
-  ([docs/security/fetcher.md](docs/security/fetcher.md)).
+- Downloads are isolated since Milestone B ([docs/security/fetcher.md](docs/security/fetcher.md)); `/verify`
+  re-hashing, the separate Syft container, evidence cross-checks and the hash-locked, digest-pinned images
+  since Milestone C ([docs/security/verification.md](docs/security/verification.md)). A compromised analyzer
+  that hides a finding consistently is not detectable by the cross-checks.
+- Dependencies: edit `backend/requirements*.txt`, then run `make lock`; images install only the
+  `backend/requirements*.lock` files, with `--require-hashes`.
 - The local chain runs in memory, so a restart erases its anchors.
 - 5 frontend npm advisories are open and unfixed: see [docs/security/npm-audit-triage.md](docs/security/npm-audit-triage.md).
   The `contracts/` tooling has separate, untriaged advisories.

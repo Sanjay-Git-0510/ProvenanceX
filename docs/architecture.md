@@ -37,9 +37,9 @@ into a per-scan, kernel-capped tmpfs staging volume. The runner has no git and n
 
 | Component | Tech | Responsibility |
 |---|---|---|
-| API | FastAPI + Pydantic | Input validation, scan endpoints, structured errors. Queues scans; never reads artifact content |
-| Scan runner | `app/runner` | Claims queued scans, runs the pipeline, launches and verifies analyzer containers (only holder of the Docker socket) |
-| Analyzer sandbox | `app/sandbox_worker`, `app/analysis` | Extraction, hashing, Syft, AI-BOM, pickle/safetensors parsing, static analysis, in a disposable container; output size-capped and schema-validated |
+| API | FastAPI + Pydantic | Input validation, scan endpoints, structured errors. Queues scans and verification jobs; never reads artifact content or hashes files |
+| Scan runner | `app/runner`, `app/verification` | Claims queued verification jobs and scans, runs the pipeline, launches and verifies analyzer containers (only holder of the Docker socket); its image adds only a signature-verified Docker CLI to the hash-locked runtime and ML stack |
+| Analyzer sandbox | `app/sandbox_worker`, `app/analysis` | Extraction, hashing, AI-BOM, pickle/safetensors parsing, static analysis (`analyze`), Syft alone (`sbom`), `/verify` re-hash (`rehash`), each in a disposable container; output size-capped, schema-validated, strictly typed and cross-checked (`app/analysis/consistency.py`) |
 | Fetcher | `app/fetch_worker`, `app/fetch`, `docker/fetcher` | GitHub and Hugging Face downloads in a disposable container on the internal fetch network; no socket, no secrets |
 | Egress proxy | `app/egress_proxy`, `docker/egress-proxy` | The fetch network's only exit: HTTPS CONNECT to an exact host allowlist, public-IP checks, pinned addresses, caps |
 | Pipeline | Python module | Runs the 22 steps in CLAUDE.md's fixed order |
@@ -402,7 +402,11 @@ so changed database values cannot be re-anchored. A row is written before sendin
 adopts the matching on-chain anchor instead of sending another. The pipeline step runs after the scan is
 completed, is off by default (`BLOCKCHAIN_ANCHOR_ON_SCAN=false`), and cannot fail the scan.
 
-**Verification.** `POST /scans/{id}/verify` reports, per field, the anchor row (`stored`), the live table
+**Verification** (asynchronous since Milestone C1, see [security/verification.md](security/verification.md)).
+`POST /scans/{id}/verify` queues a job (202) that the scan runner answers; clients poll
+`GET /scans/{id}/verifications/{job_id}`, and `GET /scans/{id}/verifications` is the history. The three file
+digests are recomputed in a read-only `rehash` analyzer container, never in the API. A job that cannot finish
+answers UNKNOWN. The answer reports, per field, the anchor row (`stored`), the live table
 (`source_table`), a fresh value (`recomputed`: a file digest for the three hashes) and the `chain` value, plus
 a comparison of the off-chain `record_hash`. File names are fixed in code and never read from the database. The
 first matching rule decides:

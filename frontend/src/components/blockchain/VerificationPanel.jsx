@@ -32,19 +32,30 @@ function Result({ result }) {
   );
 }
 
-/** The only place that calls /verify, and only from the button. Failed requests are not UNKNOWN. */
+/**
+ * The only place that calls /verify, and only from the button. The request queues a job that the
+ * scan runner answers; the hook polls it. Failed requests are not UNKNOWN.
+ */
 export default function VerificationPanel({ scanId }) {
-  const { status, result, error, verify } = useVerification(scanId);
+  const { status, result, error, job, verify } = useVerification(scanId);
   const checking = status === "checking";
+  const label = job === "running" ? "Verifying" : "Queued";
   return (
     <>
       <div className="verify__head" aria-live="polite">
         <VerificationBadge state={status === "done" ? result.state : null} />
         {status === "done" ? <MockLabel source={result.source} isMock={result.is_mock} /> : null}
         <Button variant="secondary" icon={ShieldQuestion} loading={checking} onClick={verify}>
-          {checking ? "Verifying" : "Verify"}
+          {checking ? label : "Verify"}
         </Button>
       </div>
+      {checking ? (
+        <p className="state__message panel__section">
+          {job === "running"
+            ? "The scan runner is re-hashing the kept evidence in an isolated container and reading the chain."
+            : "Verification queued. The scan runner will pick it up shortly."}
+        </p>
+      ) : null}
       {status === "failed" ? (
         <div className="panel__section">
           <ErrorState

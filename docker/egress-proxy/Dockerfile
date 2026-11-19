@@ -17,6 +17,10 @@ COPY app/egress_proxy /opt/px/app/egress_proxy
 RUN chmod -R a-w,a+rX /opt/px \
     && cd /opt/px && python -B -c "import app.egress_proxy.server, app.egress_proxy.__main__"
 
+# I1: strip setuid/setgid bits (su, mount, passwd, ...); nothing here ever needs them.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && ! find / -xdev -perm /6000 -type f | grep -q .
+
 USER 65534:65534
 WORKDIR /opt/px
 EXPOSE 3128

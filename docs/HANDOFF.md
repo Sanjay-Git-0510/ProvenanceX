@@ -4,8 +4,46 @@
 
 _Last updated: 2026-11-19_
 
-- **Master-prompt Phase 1, Milestone B (isolated downloads): implemented 2026-11-19, uncommitted, awaiting owner
-  review.** Milestone C is not started. Details, controls and test table: [security/fetcher.md](security/fetcher.md).
+- **Milestone C3-C5 (audit M6, I1, L9, L11; docs): implemented 2026-11-19, uncommitted, awaiting owner review.**
+  Milestone C (C1-C5) is complete; nothing is committed. Overview: [security/verification.md](security/verification.md).
+  - C3: every base digest-pinned (Python 3.12.8 slim, Node 22 slim, Postgres 16); Python packages only from
+    `backend/requirements*.lock` (`make lock` = `scripts/lock.sh`, pip-tools 7.7.0 in the pinned base), installed
+    with `--require-hashes --no-deps`; direct deps exact. `backend/Dockerfile` is multi-stage: the Docker CLI comes
+    from Docker's signed apt repo (pinned key fingerprint + pinned `.deb` SHA-256) in a build stage; API and runner
+    images have no curl, gnupg, compiler or Syft (Syft runs only in the analyzer). setuid/setgid bits stripped in
+    every image, build fails if any remain (I1). Workspace volume and fetch/egress networks default to
+    `<compose project>_*` (L9). The runner keeps the ML stack (risk stage) and adds only the Docker CLI.
+  - C4: CI jobs `images` (build every image, check setuid/downloaders/CLI) and `live` (real Docker, PostgreSQL,
+    Hardhat; `(sandbox or chain or integration) and not network`, no skips). Valid YAML and actionlint-clean; not
+    executed on GitHub until pushed. `tests/e2e/test_full_pipeline.py` now polls the verification job.
+  - Verified locally 2026-11-19: default suite 3275 passed (PostgreSQL on); offline live 137 passed, 0 skipped;
+    internet live 24 passed; `verify_e2e.py` 48/48; Vitest 499, ESLint, build; contracts 32 passing + ABI check.
+  - Not run: GitHub-hosted CI, the Docker Desktop restart test (manual), arm64 builds.
+
+- **Milestone C2 (audit M4 + L4, L5): implemented 2026-11-19, uncommitted, awaiting owner review.**
+  - Syft runs alone in a new `sbom` analyzer mode (staging read-only, same hardening); its own tree digest must equal
+    the analyze digest. The analyze container can no longer carry an SBOM (schema). `ANALYZER_SBOM_TIMEOUT_SECONDS`.
+  - `app/analysis/consistency.py` runs after every analyze: file list well formed and equal to file_count; manifest,
+    static and AI-BOM paths inside the tree; counts bounded and self-consistent; strict typed static features and
+    AI-BOM summary/config fields (`codec.py`). SBOM stage refuses real-Syft locations outside the tree. A
+    contradiction fails the scan (or the SBOM stage) as `analyzer_output_invalid`. Verify: a rehash with the anchored
+    digest but other counts answers UNKNOWN (`rehash_inconsistent`).
+  - L4: bind sources must be exactly `<WORKSPACE_ROOT>/<scan>[/src|/input]`. L5: worker error `details` capped
+    (4 KiB, depth 6; workers clamp), untrusted stderr logged only as an escaped excerpt.
+
+- **Milestone C1 (audit M5, asynchronous /verify): implemented 2026-11-19, uncommitted, awaiting owner
+  review.** C2-C5 not started. Full docs follow in C5.
+  - `POST /scans/{id}/verify` only queues a `verification_runs` row (migration `0009`) and answers 202 with the
+    job; the scan's active job is reused (partial unique index); past `VERIFY_MAX_PENDING` it answers 429; a scan
+    that can never be anchored is answered at once (200, NOT ANCHORED). Poll `GET /scans/{id}/verifications/{job_id}`;
+    history at `GET /scans/{id}/verifications`. The API reads no files and no chain for verify.
+  - The scan-runner claims jobs (SKIP LOCKED, claim token, heartbeat, `VerifyGuard` watchdog), re-hashes the kept
+    evidence in a new `rehash` analyzer mode (network none, scan workspace mounted read-only at `/evidence`,
+    O_NOFOLLOW + inode checks, strict `DigestOut` schema), runs the unchanged comparison, and stores the answer with
+    a fenced UPDATE. Failures, timeouts, lost claims and stale jobs answer UNKNOWN; reconcile removes orphaned
+    rehash containers by the job's claim token. States unchanged: VERIFIED, MISMATCH, NOT ANCHORED, UNKNOWN.
+
+- **Master-prompt Phase 1, Milestone B (isolated downloads): committed (`996e1d9`).** Details, controls and test table: [security/fetcher.md](security/fetcher.md).
   - H1: GitHub/HF downloads run only in a per-scan fetcher container (`docker/fetcher`, `app/fetch_worker`,
     `app/fetch`) on a Docker `internal` network whose only exit is a standard-library egress proxy
     (`docker/egress-proxy`, `app/egress_proxy`: exact host allowlist, port 443, single DNS resolution, public-IP

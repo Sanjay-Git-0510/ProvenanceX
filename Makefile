@@ -3,7 +3,11 @@ PY := backend/.venv/bin
 # Group that owns the Docker socket, given to the Compose scan-runner (docker-compose.yml).
 export DOCKER_SOCKET_GID ?= $(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)
 
-.PHONY: up analyzer-image fetcher-image sandbox-images runner down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
+.PHONY: lock up analyzer-image fetcher-image sandbox-images runner down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
+
+# Regenerate the hash-locked requirement files (audit M6) from backend/requirements*.txt.
+lock:
+	scripts/lock.sh
 
 up: sandbox-images
 	docker compose up --build -d

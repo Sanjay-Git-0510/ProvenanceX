@@ -1,5 +1,6 @@
 """API tests for /anchor, /blockchain and /verify, and the pipeline's anchor step."""
 
+import json
 import uuid
 from dataclasses import replace
 
@@ -83,8 +84,27 @@ def scan_id(session_factory, settings):
     return new_id
 
 
+class _Answer:
+    """A finished verification job, read back like the old synchronous response."""
+
+    def __init__(self, posted, job):
+        self.posted, self.job = posted, job
+        self.status_code = 200
+        self.text = json.dumps(job)
+
+    def json(self):
+        return self.job["result"]
+
+
 def _post(client, scan_id, action):
-    return client.post(f"/api/v1/scans/{scan_id}/{action}")
+    response = client.post(f"/api/v1/scans/{scan_id}/{action}")
+    if action != "verify" or response.status_code not in (200, 202):
+        return response
+    job = response.json()
+    got = client.get(f"/api/v1/scans/{scan_id}/verifications/{job['job_id']}")
+    assert got.status_code == 200, got.text
+    assert got.json()["status"] in ("completed", "failed"), got.text
+    return _Answer(response, got.json())
 
 
 def test_anchor_then_verify(client, scan_id):

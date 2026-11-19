@@ -1,72 +1,90 @@
-FROM python:3.12-slim AS base
+# ProvenanceX API and scan-runner images (audit finding M6: supply chain).
+#
+#   docker compose build api scan-runner        (targets: api, runner)
+#
+# - Every base is pinned by digest; the same base as the sandbox images (docker/*).
+# - Python packages come only from the hash-locked files (backend/requirements*.lock, `make
+#   lock`), installed with --require-hashes --no-deps: an unlisted or altered wheel fails.
+# - curl, gnupg and apt metadata exist only in the docker-cli build stage; the final images
+#   have no downloader and no build tools.
+# - setuid/setgid bits are stripped from every file in the final images (audit finding I1).
+# - Syft is not here: it runs only in the analyzer sandbox's `sbom` mode (docker/analyzer).
+#
+# Constraint (documented): the runner image cannot be smaller than the ML stack. The runner runs
+# the risk stage (Random Forest / Isolation Forest / XGBoost / SHAP over the saved models), so
+# numpy, scikit-learn, xgboost (with its NCCL wheel), skops and shap stay in both images; the
+# runner adds only the Docker CLI.
+
+ARG PY_BASE=python:3.12.8-slim-bookworm@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0
+
+# --- Docker CLI for the runner, from Docker's GPG-signed apt repository ---------------------
+# Two independent checks: apt verifies the package against the repository's signed index with a
+# key whose fingerprint is pinned here, and the .deb must also match the SHA-256 pinned below
+# (read from that signed index on 2026-11-19). Update version, hashes and fingerprint together.
+FROM ${PY_BASE} AS docker-cli
+ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+ARG DOCKER_CLI_VERSION=5:27.5.1-1~debian.12~bookworm
+ARG DOCKER_CLI_DEB_SHA256_AMD64=4ddc7a54df16f80edb14e422ac875cff7ad505acca733564b8363d668bf691e0
+ARG DOCKER_CLI_DEB_SHA256_ARM64=7aa5aa042ddab7bf937951f968508cd040a7fed393302a338bf12c1c78ce16db
+ARG TARGETARCH=amd64
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    case "${TARGETARCH}" in \
+      amd64) sha="${DOCKER_CLI_DEB_SHA256_AMD64}" ;; \
+      arm64) sha="${DOCKER_CLI_DEB_SHA256_ARM64}" ;; \
+      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/docker.asc https://download.docker.com/linux/debian/gpg; \
+    fpr="$(gpg --show-keys --with-colons /tmp/docker.asc | awk -F: '$1=="fpr"{print $10; exit}')"; \
+    [ "${fpr}" = "${DOCKER_GPG_FINGERPRINT}" ] || { echo "Docker key fingerprint ${fpr} is not pinned" >&2; exit 1; }; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.asc; \
+    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" \
+      > /etc/apt/sources.list.d/docker.list; \
+    apt-get update; \
+    cd /tmp; \
+    apt-get download "docker-ce-cli=${DOCKER_CLI_VERSION}"; \
+    deb="$(ls /tmp/docker-ce-cli_*.deb)"; \
+    echo "${sha}  ${deb}" | sha256sum -c -; \
+    dpkg-deb -x "${deb}" /tmp/cli; \
+    install -D -m 0755 /tmp/cli/usr/bin/docker /out/docker; \
+    /out/docker --version
+
+# --- Shared runtime ----------------------------------------------------------------------------
+FROM ${PY_BASE} AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# No git: the API and the scan-runner never clone or download artifacts. Downloads run only in
-# the isolated fetcher image (docker/fetcher, Milestone B, audit finding H1).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Syft (SBOM generation, app/scanners/sbom/syft.py). The version and the per-arch SHA-256
-# are pinned. Values come from the release's syft_<ver>_checksums.txt; update both together.
-ARG SYFT_VERSION=1.57.0
-ARG SYFT_SHA256_AMD64=9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704
-ARG SYFT_SHA256_ARM64=410cbfa0ae0f63246bc0057843760b1de2833cd23919e025e368fd7681308cdb
-ARG TARGETARCH=amd64
-RUN set -eu; \
-    case "${TARGETARCH}" in \
-      amd64) sha="${SYFT_SHA256_AMD64}" ;; \
-      arm64) sha="${SYFT_SHA256_ARM64}" ;; \
-      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    tarball="syft_${SYFT_VERSION}_linux_${TARGETARCH}.tar.gz"; \
-    curl -sSfL -o "/tmp/${tarball}" \
-      "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${tarball}"; \
-    echo "${sha}  /tmp/${tarball}" | sha256sum -c -; \
-    tar -xzf "/tmp/${tarball}" -C /usr/local/bin syft; \
-    rm "/tmp/${tarball}"; \
-    syft version
-
+# No git and no curl: the API and the scan-runner never clone or download artifacts. Downloads
+# run only in the isolated fetcher image (docker/fetcher, Milestone B, audit finding H1).
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
-# requirements-ml.txt holds the exact versions the saved models were built with.
-COPY requirements.txt requirements-ml.txt ./
-RUN pip install -r requirements.txt -r requirements-ml.txt
+# requirements-ml.lock holds the exact versions the saved models were built with.
+COPY requirements.lock requirements-ml.lock ./
+RUN pip install --require-hashes --no-deps -r requirements.lock -r requirements-ml.lock \
+    && pip check
 
 COPY . .
-RUN mkdir -p /app/workspace && chown -R app:app /app
+# I1: no setuid/setgid binaries (su, mount, passwd, ...) remain; the services never need them.
+RUN mkdir -p /app/workspace && chown -R app:app /app \
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && ! find / -xdev -perm /6000 -type f | grep -q .
 
-# --- scan-runner: the API image plus a pinned Docker CLI. It is the only service that gets the
-# Docker socket (see docker-compose.yml). It has no HTTP port and never reads artifact content
-# itself: it launches the analyzer sandbox (docker/analyzer) for every content-reading step.
-# The CLI SHA-256 values were computed from download.docker.com on 2026-11-18 (Docker does not
-# publish checksums for the static tarballs); update version and hashes together.
+# --- scan-runner: the shared runtime plus the verified Docker CLI. It is the only service that
+# gets the Docker socket (see docker-compose.yml). It has no HTTP port and never reads artifact
+# content itself: it launches the analyzer and fetcher sandboxes for that.
 FROM base AS runner
-ARG DOCKER_CLI_VERSION=27.5.1
-ARG DOCKER_CLI_SHA256_AMD64=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
-ARG DOCKER_CLI_SHA256_ARM64=e6b53725a73763ab3f988c73f8772eaed429754c1a579db5ff11f21990fd1817
-ARG TARGETARCH=amd64
-RUN set -eu; \
-    case "${TARGETARCH}" in \
-      amd64) arch=x86_64; sha="${DOCKER_CLI_SHA256_AMD64}" ;; \
-      arm64) arch=aarch64; sha="${DOCKER_CLI_SHA256_ARM64}" ;; \
-      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -sSfL -o /tmp/docker.tgz \
-      "https://download.docker.com/linux/static/stable/${arch}/docker-${DOCKER_CLI_VERSION}.tgz"; \
-    echo "${sha}  /tmp/docker.tgz" | sha256sum -c -; \
-    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
-    install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
-    rm -rf /tmp/docker.tgz /tmp/docker
+COPY --from=docker-cli /out/docker /usr/local/bin/docker
 USER app
 CMD ["python", "-m", "app.runner"]
 
-# --- api (default target): no Docker CLI, no socket. It only queues scans.
+# --- api (default target): no Docker CLI, no socket. It only queues scans and jobs.
 FROM base AS api
 USER app
 

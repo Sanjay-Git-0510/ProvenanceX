@@ -115,3 +115,27 @@ class VerificationResponse(BaseModel):
     contract_address: str | None
     verified_at: datetime
     note: str
+
+
+class VerificationJob(BaseModel):
+    """One verification request (POST /verify) and, once finished, its answer.
+
+    status: queued | running | completed | failed. A failed job always answers UNKNOWN. `state`
+    and `result` are null until the job has finished.
+    """
+
+    job_id: UUID
+    scan_id: UUID
+    status: Literal["queued", "running", "completed", "failed"]
+    state: VerificationState | None
+    reason: VerificationReason | None
+    result: VerificationResponse | None
+    requested_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class VerificationHistory(BaseModel):
+    scan_id: UUID
+    items: list[VerificationJob]
+    total: int

@@ -21,6 +21,7 @@ The Docker CLI runs as an argv list (no shell) with an allowlisted environment. 
 raises a sandbox_* AppError. There is no fallback: the caller fails the scan.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ from app.analysis.docker_cli import docker_env
 from app.analysis.framing import FrameDecoder, FrameError
 from app.analysis.hardening import (
     ARTIFACT_DST,
+    EVIDENCE_DST,
     INPUT_DST,
     NO_CLAIM,
     OUT_DST,
@@ -51,6 +53,7 @@ from app.analysis.hardening import (
     resolve_workspace_dir,
     verify_runtime_config,
 )
+from app.core.bounded import printable_excerpt
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.pipeline.ownership import ClaimLost, current_claim
@@ -121,7 +124,7 @@ class ContainerCli:
             return None, b""
         if done.returncode != 0 and done.stderr:
             logger.warning(
-                "docker %s: %s", args[0], done.stderr[:_STDERR_LOG_BYTES].decode("utf-8", "replace")
+                "docker %s: %s", args[0], printable_excerpt(done.stderr[:_STDERR_LOG_BYTES])
             )
         return done.returncode, done.stdout[:limit]
 
@@ -293,6 +296,8 @@ class DockerAnalyzer(ContainerCli):
         timeout = {
             "extract": s.analyzer_extract_timeout_seconds,
             "persist": s.analyzer_extract_timeout_seconds,
+            "rehash": s.verify_rehash_timeout_seconds,
+            "sbom": s.analyzer_sbom_timeout_seconds,
         }.get(mode, s.analyzer_timeout_seconds)
         return AnalyzerLimits(
             timeout_seconds=timeout,
@@ -317,6 +322,9 @@ class DockerAnalyzer(ContainerCli):
             path, Path(self.settings.workspace_root), job.scan_id
         )
         source = str(resolved) if self.mount_kind == "bind" else self.volume
+        if subdir == "scan":
+            spec = MountSpec(self.mount_kind, source, target, "scan", True, job.scan_id)  # type: ignore[arg-type]
+            return spec, uid, gid
         return (
             MountSpec(self.mount_kind, source, target, subdir, read_only, job.scan_id),  # type: ignore[arg-type]
             uid,
@@ -335,6 +343,8 @@ class DockerAnalyzer(ContainerCli):
         if mode == "extract":
             workspace = [(ws.input_dir, INPUT_DST, "input", True)]
             staging = [self._staging(job, OUT_DST, False)]
+        elif mode == "sbom":
+            staging = [self._staging(job, ARTIFACT_DST, True)]
         elif mode == "analyze":
             staging = [self._staging(job, ARTIFACT_DST, True)]
             if job.has_upload:
@@ -342,9 +352,14 @@ class DockerAnalyzer(ContainerCli):
         elif mode == "persist":
             staging = [self._staging(job, ARTIFACT_DST, True)]
             workspace = [(ws.src_dir, OUT_DST, "src", False)]
+        elif mode == "rehash":
+            # The kept evidence only, read-only. No staging volume and no upload is involved.
+            workspace = [(ws.root, EVIDENCE_DST, "scan", True)]
         else:  # hold
             staging = [self._staging(job, ARTIFACT_DST, True)]
-        mounts, owners = [], {self.workspace_owner(job)}
+        # rehash must still run when src/ is gone (a deleted tree answers UNKNOWN), so its owner
+        # comes from the scan directory it mounts.
+        mounts, owners = [], set() if mode == "rehash" else {self.workspace_owner(job)}
         for path, target, subdir, ro in workspace:
             mount, uid, gid = self._mount(path, job, target, subdir, ro)
             mounts.append(mount)
@@ -394,7 +409,9 @@ class DockerAnalyzer(ContainerCli):
 
     def _create_verified(self, docker: str, spec: AnalyzerSpec, base: dict[str, Any]) -> dict:
         argv = build_create_argv(docker, spec)
-        assert_create_hardened(argv)
+        assert_create_hardened(
+            argv, workspace_root=str(Path(self.settings.workspace_root).resolve())
+        )
         self._remove(spec.name)  # a leftover from a crashed runner
         code, _ = self._capture(argv[1:])
         if code is None:
@@ -446,7 +463,7 @@ class DockerAnalyzer(ContainerCli):
         base = {"mode": mode, "provider": self.name, "image": self.image, "container": spec.name}
 
         self._check_claim(job)
-        if mode == "analyze":
+        if mode == "sbom":
             job.sbom_path.unlink(missing_ok=True)
         sbom_file: list[BinaryIO] = []
         opener = self._open_sbom(job)
@@ -459,7 +476,7 @@ class DockerAnalyzer(ContainerCli):
         decoder = FrameDecoder(
             max_envelope=self.max_output,
             max_sbom=self.max_sbom,
-            open_sbom=open_sbom if mode == "analyze" and job.kind == "software" else None,
+            open_sbom=open_sbom if mode == "sbom" else None,
         )
         ok = False
         try:
@@ -489,8 +506,13 @@ class DockerAnalyzer(ContainerCli):
                 "duration_seconds": round(duration, 3),
             }
             if err_head:
+                # Untrusted output (audit L5): size, digest and an escaped excerpt, never raw.
                 logger.warning(
-                    "Analyzer %s stderr: %s", spec.name, err_head.decode("utf-8", "replace")
+                    "Analyzer %s stderr (first %d bytes, sha256 %s): %s",
+                    spec.name,
+                    len(err_head),
+                    hashlib.sha256(err_head).hexdigest()[:16],
+                    printable_excerpt(err_head),
                 )
             self._raise_for_exit(spec, mode, record, exit_code)
             try:
@@ -512,7 +534,7 @@ class DockerAnalyzer(ContainerCli):
         finally:
             for handle in sbom_file:
                 handle.close()
-            if not ok and mode == "analyze":
+            if not ok and mode == "sbom":
                 job.sbom_path.unlink(missing_ok=True)
             self._remove(spec.name)
 
@@ -549,7 +571,7 @@ class DockerAnalyzer(ContainerCli):
     @staticmethod
     def _check_sbom(result: Any, decoder: FrameDecoder) -> None:
         """The SBOM frame must exist exactly when the envelope describes one, and match it."""
-        described = result.analysis.sbom if result.analysis is not None else None
+        described = result.sbom_run.sbom if result.sbom_run is not None else None
         if described is None:
             if decoder.has_sbom:
                 raise output_invalid("an SBOM frame was sent without an SBOM description")

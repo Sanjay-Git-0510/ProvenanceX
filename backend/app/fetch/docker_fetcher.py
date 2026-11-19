@@ -26,6 +26,7 @@ from app.analysis.docker_analyzer import ContainerCli, failed, unavailable
 from app.analysis.framing import FrameDecoder, FrameError
 from app.analysis.hardening import NO_CLAIM, refuse
 from app.analysis.staging import LOCK_FETCH, advisory_lock, scan_of_volume, wait_for_capacity
+from app.core.bounded import printable_excerpt
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.fetch.base import (
@@ -214,8 +215,12 @@ class DockerFetcher(ContainerCli):
                 "duration_seconds": round(duration, 3),
             }
             if err_head:
+                # Untrusted output (audit L5): an escaped excerpt, never raw.
                 logger.warning(
-                    "Fetcher %s stderr: %s", spec.name, err_head.decode("utf-8", "replace")
+                    "Fetcher %s stderr (%d bytes shown escaped): %s",
+                    spec.name,
+                    len(err_head),
+                    printable_excerpt(err_head),
                 )
             self._raise_for_exit(spec, record, exit_code)
             try:

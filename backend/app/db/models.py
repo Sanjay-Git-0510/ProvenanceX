@@ -28,6 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -168,6 +169,9 @@ class Scan(Base):
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
     blockchain_evidence: Mapped["BlockchainEvidence | None"] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
+    )
+    verification_runs: Mapped[list["VerificationRun"]] = relationship(
         back_populates="scan", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -388,3 +392,67 @@ class BlockchainEvidence(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     scan: Mapped[Scan] = relationship(back_populates="blockchain_evidence")
+
+
+class VerificationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+ACTIVE_VERIFICATION = (VerificationStatus.QUEUED.value, VerificationStatus.RUNNING.value)
+_ACTIVE_SQL = text("status IN ('queued', 'running')")
+
+
+class VerificationRun(Base):
+    """One POST /verify request and its outcome (Milestone C1, audit finding M5).
+
+    The API only inserts a queued row. A scan-runner claims it (claim token + heartbeat, like a
+    scan), re-hashes the kept evidence in a read-only analyzer container, reads the chain and
+    stores the answer with a conditional UPDATE on its own token. At most one queued or running
+    row exists per scan (partial unique index). Every finished row has a `state` (VERIFIED,
+    MISMATCH, NOT ANCHORED or UNKNOWN) and a `result`; a failed job always answers UNKNOWN.
+    Rows are kept as the scan's verification history.
+    """
+
+    __tablename__ = "verification_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed')",
+            name="ck_verification_runs_status",
+        ),
+        CheckConstraint(
+            "state IS NULL OR state IN ('VERIFIED', 'MISMATCH', 'NOT ANCHORED', 'UNKNOWN')",
+            name="ck_verification_runs_state",
+        ),
+        Index(
+            "uq_verification_runs_active_scan",
+            "scan_id",
+            unique=True,
+            postgresql_where=_ACTIVE_SQL,
+            sqlite_where=_ACTIVE_SQL,
+        ),
+        Index("ix_verification_runs_status_requested", "status", "requested_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default=VerificationStatus.QUEUED.value)
+    state: Mapped[str | None] = mapped_column(String(16))
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    reason_message: Mapped[str | None] = mapped_column(Text)
+    # The full VerificationResponse once finished. Never holds file content or host paths.
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+    # The rehash container run (image id, verified runtime limits, exit code, duration).
+    sandbox: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    claimed_by: Mapped[str | None] = mapped_column(String(128))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    scan: Mapped[Scan] = relationship(back_populates="verification_runs")

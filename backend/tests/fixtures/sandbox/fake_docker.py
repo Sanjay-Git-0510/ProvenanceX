@@ -332,6 +332,8 @@ def main() -> int:
                 sys.stdout.buffer.write(chunk)
         elif mode == "ok":
             sys.stdout.buffer.write(Path(CONFIG["output_file"]).read_bytes())
+            if CONFIG.get("stderr"):
+                sys.stderr.buffer.write(CONFIG["stderr"].encode())
         sys.stdout.flush()
         return int(CONFIG.get("exit_code", 0))
     print(f"fake docker: unsupported {args}", file=sys.stderr)

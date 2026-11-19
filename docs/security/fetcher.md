@@ -1,6 +1,7 @@
 # Isolated downloads, egress proxy and kernel-capped storage (Milestone B)
 
-_Status: implemented 2026-11-19, uncommitted, awaiting owner review. Milestone C is not started._
+_Status: implemented 2026-11-19 and committed (`996e1d9`). Milestone C (2026-11-19, uncommitted):
+see [verification.md](verification.md)._
 
 This document covers audit finding **H1** (Git and Hugging Face downloads ran inside the
 scan-runner, which holds the Docker socket and the deployment's secrets), the follow-up
@@ -276,8 +277,8 @@ scripts/milestone_b/down.sh                  # removes project "pxmb" only
   make a real resolver change its answer mid-test.
 - **The proxy cannot inspect TLS**, so it cannot enforce HTTP-level rules (paths, redirects,
   response sizes per file). Those stay in the fetcher, behind the network-level guarantees.
-- **The `/verify` re-hash** still reads the kept tree in the API process (documented exception,
-  Milestone C).
+- ~~The `/verify` re-hash in the API~~: moved to a runner-side `rehash` container in Milestone C1
+  ([verification.md](verification.md)).
 - **Fetched identity comes from an untrusted container.** The commit SHA, the Hub listing and its
   hashes are reported by the fetcher, which parsed network data. Isolation keeps a compromised
   fetcher away from the host, the database and secrets, but it could misreport what it fetched.
@@ -290,5 +291,6 @@ scripts/milestone_b/down.sh                  # removes project "pxmb" only
 
 ## Deferred findings
 
-**M4, M5, M6** and the rest of Milestone C are deferred, as instructed. The audit report is not in
-the repository, so their content is not restated here.
+**M4, M5, M6** were resolved in Milestone C, together with L4, L5, L9, L11 and I1: see
+[verification.md](verification.md). The fetcher image now installs `requirements-fetcher.lock`
+with `--require-hashes` and has no setuid/setgid files.

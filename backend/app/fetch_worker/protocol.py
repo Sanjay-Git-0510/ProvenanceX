@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
+from app.core.bounded import BoundedDetails
+
 REQUEST_FORMAT = "provenancex-fetch-request-v1"
 RESULT_FORMAT = "provenancex-fetch-result-v1"
 
@@ -54,7 +56,8 @@ class FetchRequest(_Strict):
 class SectionError(_Strict):
     code: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
     message: str = Field(max_length=2000)
-    details: Any = None
+    # Small plain JSON only (audit finding L5): it is stored on the scan and shown by the API.
+    details: BoundedDetails = None
 
 
 class HfFileOut(_Strict):

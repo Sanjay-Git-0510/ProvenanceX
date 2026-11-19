@@ -133,12 +133,18 @@ for f in json.load(sys.stdin)["items"]:
     print("  %-14s%-8scvss=%s  %s" % (f["category"], f["severity"], f["cvss"]["score"], f["identifier"]))'
 }
 
-# verify ID: ask for verification and print the state and any field that does not match.
+# verify ID: queue a verification job, wait for the scan runner's answer, print the state and
+# any field that does not match. POST /verify only queues (202); the job is polled until finished.
 verify() {
-  curl -s -X POST "$API/scans/$1/verify" | python3 -c '
+  job=$(curl -s -X POST "$API/scans/$1/verify" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')
+  until body=$(curl -s "$API/scans/$1/verifications/$job") && \
+        python3 -c 'import json,sys; sys.exit(json.loads(sys.argv[1])["status"] in ("queued","running"))' "$body"; do
+    sleep 1
+  done
+  python3 -c '
 import json,sys
-d=json.load(sys.stdin); print(d["state"], "-", d["reason"]["code"], "-", d["reason"]["message"])
-print("  fields:", {f["field"]:f["status"] for f in d["fields"] if f["status"]!="match"} or "all match" if d["fields"] else "none compared")'
+d=json.loads(sys.argv[1])["result"]; print(d["state"], "-", d["reason"]["code"], "-", d["reason"]["message"])
+print("  fields:", {f["field"]:f["status"] for f in d["fields"] if f["status"]!="match"} or "all match" if d["fields"] else "none compared")' "$body"
 }
 ```
 
@@ -530,7 +536,7 @@ UNKNOWN - chain_state_lost - The contract no longer exists on the chain
 To get a working chain again, run `make demo-down` and then `make demo`. Step g works without one.
 
 **In the dashboard (Not run):** The page is **Blockchain Evidence**. Choose a scan and click **Verify** after each
-change. The result and a per-field table appear in the **Verification** panel, and the **Anchor record** panel shows
+change. The button shows **Queued**, then **Verifying**, while the scan runner answers the job. The result and a per-field table appear in the **Verification** panel, and the **Anchor record** panel shows
 the stored data. The UI has no Anchor button.
 
 VERIFIED means the record has not changed since it was anchored. It does not mean the scanner was right or the
@@ -538,8 +544,10 @@ artifact is safe.
 
 > **What is happening inside.** Step 19 (anchor): `app/pipeline/anchor_stage.py`, `app/blockchain/anchoring.py`,
 > `app/blockchain/web3_provider.py`, `contracts/contracts/ProvenanceEvidence.sol`. Only eight fields go on-chain.
-> Step 20 (verify): `app/blockchain/verification.py` recomputes the three hashes from the files and compares them with
-> the database row, the live tables and the chain.
+> Step 20 (verify): `POST /verify` only queues a job (`app/verification/jobs.py`). The scan runner
+> (`app/verification/executor.py`) recomputes the three hashes in a read-only `rehash` analyzer container, and
+> `app/blockchain/verification.py` compares them with the database row, the live tables and the chain
+> ([security/verification.md](security/verification.md)).
 
 ### g. Run the CI gate and see every exit code
 

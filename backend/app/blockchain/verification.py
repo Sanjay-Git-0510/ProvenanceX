@@ -3,12 +3,17 @@
 VERIFIED means the record has not changed since it was anchored. It does not mean the scanner was
 right or the artifact is safe. Chain trouble and missing off-chain files give UNKNOWN, never
 VERIFIED. A definite difference gives MISMATCH even when something else could not be checked.
+
+This module never reads artifact files (audit finding M5). The three recomputed file digests
+come from a `DigestSource`: in a deployment, the scan-runner's read-only `rehash` analyzer
+container (app/verification/executor.py). It is called at most once, and only when a stored
+anchor or a chain record exists to compare against.
 """
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -21,12 +26,9 @@ from app.blockchain.encoding import (
     record_hash,
     timestamp_seconds,
 )
-from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
-from app.core.hashing import sha256_file, tree_digest
 from app.db.models import (
     AnchorStatus,
-    ArtifactType,
     BlockchainEvidence,
     ProvenanceRecord,
     RiskDecision,
@@ -34,10 +36,7 @@ from app.db.models import (
     ScanStatus,
     utcnow,
 )
-from app.pipeline.aibom_stage import AIBOM_FILENAME
-from app.pipeline.provenance_stage import PROVENANCE_FILENAME
-from app.pipeline.sbom_stage import SBOM_FILENAME
-from app.pipeline.workspace import open_workspace
+from app.pipeline.ownership import ClaimLost
 from app.schemas.blockchain import (
     FieldComparison,
     VerificationReason,
@@ -66,47 +65,30 @@ def _public(value: Any) -> Any:
     return None if isinstance(value, _Value) else value
 
 
-def _file_digest(path: Path) -> str | _Value:
-    """A replaced file counts as changed. A file that is simply gone cannot be checked."""
-    try:
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            return _Value.INVALID
-        if not path.exists():
-            return _Value.UNAVAILABLE
-        return sha256_file(path)
-    except OSError as exc:
-        logger.warning("Could not read off-chain evidence: %s", type(exc).__name__)
-        return _Value.UNAVAILABLE
+DigestValue = _Value
 
 
-def _tree_digest(src: Path, max_files: int) -> str | _Value:
-    if src.is_symlink():
-        return _Value.INVALID
-    if not src.is_dir():
-        return _Value.UNAVAILABLE
-    try:
-        return tree_digest(src, max_files=max_files).sha256
-    except AppError as exc:
-        # Ingestion refuses symlinks and special files, so finding one means the tree changed.
-        return _Value.INVALID if exc.code == ErrorCode.UNSAFE_CONTENT else _Value.UNAVAILABLE
-    except OSError as exc:
-        logger.warning("Could not read the artifact tree: %s", type(exc).__name__)
-        return _Value.UNAVAILABLE
+@dataclass(frozen=True)
+class Recomputed:
+    """Fresh digests of the off-chain evidence, keyed by HASH_FIELDS.
+
+    Each value is a hex digest, DigestValue.UNAVAILABLE (could not be checked) or
+    DigestValue.INVALID (replaced by a symlink or special file: counts as changed). `failure`
+    names why nothing could be recomputed (for example the rehash sandbox failed).
+    """
+
+    values: dict[str, str | _Value]
+    failure: VerificationReason | None = None
+
+    @classmethod
+    def unavailable(cls, code: str, message: str) -> "Recomputed":
+        return cls(
+            dict.fromkeys(HASH_FIELDS, _Value.UNAVAILABLE),
+            VerificationReason(code=code, message=message),
+        )
 
 
-def _recompute_hashes(scan: Scan, settings: Settings) -> dict[str, str | _Value]:
-    """Digest the off-chain files. Names are fixed here and never read from the database."""
-    try:
-        workspace = open_workspace(settings.workspace_root, scan.id)
-    except AppError:
-        return dict.fromkeys(HASH_FIELDS, _Value.UNAVAILABLE)
-    is_software = scan.artifact.artifact_type == ArtifactType.SOFTWARE
-    bom_name = SBOM_FILENAME if is_software else AIBOM_FILENAME
-    return {
-        "artifact_hash": _tree_digest(workspace.src_dir, settings.max_artifact_files),
-        "bom_hash": _file_digest(workspace.root / bom_name),
-        "provenance_hash": _file_digest(workspace.root / PROVENANCE_FILENAME),
-    }
+DigestSource = Callable[[Scan], Recomputed]
 
 
 @dataclass(frozen=True)
@@ -232,12 +214,11 @@ def _build_fields(
     scan: Scan,
     row: BlockchainEvidence | None,
     chain_record: AnchorRecord | None,
-    settings: Settings,
+    files: dict[str, str | _Value],
 ) -> list[FieldComparison]:
     source = _read_source(session, scan)
     stored = _row_values(row)
     chain = _chain_values(chain_record)
-    files = _recompute_hashes(scan, settings)
     row_known, chain_known = row is not None, chain_record is not None
     fields: list[FieldComparison] = []
     recomputed_values = dict(source.encoded)
@@ -292,13 +273,28 @@ def _scalar(value: Any) -> Any:
     return str(value) if isinstance(value, UUID) else value
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Context:
     session: Session
     scan: Scan
     row: BlockchainEvidence | None
     provider: ChainProvider | None
-    settings: Settings
+    digests: DigestSource
+    _recomputed: Recomputed | None = field(default=None, repr=False)
+
+    def recomputed(self) -> Recomputed:
+        """Run the digest source once, on first need."""
+        if self._recomputed is None:
+            try:
+                self._recomputed = self.digests(self.scan)
+            except ClaimLost:
+                raise  # the job was taken away: nothing may be answered
+            except Exception:
+                logger.exception("Recomputing the evidence of scan %s failed", self.scan.id)
+                self._recomputed = Recomputed.unavailable(
+                    "rehash_failed", "The off-chain evidence could not be re-hashed"
+                )
+        return self._recomputed
 
 
 def _finish(
@@ -310,7 +306,7 @@ def _finish(
 ) -> VerificationResponse:
     row = context.row
     fields = (
-        _build_fields(context.session, context.scan, row, chain_record, context.settings)
+        _build_fields(context.session, context.scan, row, chain_record, context.recomputed().values)
         if row is not None or chain_record is not None
         else []
     )
@@ -398,7 +394,7 @@ def _verify_confirmed(
         )
         return result.model_copy(update={"state": VerificationState.MISMATCH, "reason": reason})
     if "unavailable" in statuses:
-        reason = VerificationReason(
+        reason = context.recomputed().failure or VerificationReason(
             code="offchain_evidence_unavailable",
             message="Off-chain evidence is missing, so the hashes could not all be recomputed",
         )
@@ -431,26 +427,53 @@ def _verify_on_chain(context: _Context, provider: ChainProvider) -> Verification
     return _verify_confirmed(context, provider, anchors)
 
 
+def _not_anchorable(session: Session, scan: Scan) -> bool:
+    has_decision = session.scalars(
+        select(RiskDecision.id).where(RiskDecision.scan_id == scan.id)
+    ).first()
+    return scan.status != ScanStatus.COMPLETED or has_decision is None
+
+
+def cannot_be_anchored(session: Session, scan: Scan) -> bool:
+    """True when the scan has no anchor row and can never get one (database only)."""
+    row = session.scalars(
+        select(BlockchainEvidence.id).where(BlockchainEvidence.scan_id == scan.id)
+    ).first()
+    return row is None and _not_anchorable(session, scan)
+
+
+def _no_digests(scan: Scan) -> Recomputed:
+    raise AssertionError("a scan that cannot be anchored is never re-hashed")
+
+
+def not_anchored_response(session: Session, scan: Scan) -> VerificationResponse:
+    """The NOT ANCHORED answer for a scan where cannot_be_anchored() is True."""
+    context = _Context(session, scan, None, None, _no_digests)
+    return _not_anchored(context, "scan_not_anchorable", "This scan cannot have an anchor")
+
+
 def verify_scan(
-    session: Session, scan_id: UUID, provider: ChainProvider | None, settings: Settings
+    session: Session, scan_id: UUID, provider: ChainProvider | None, digests: DigestSource
 ) -> VerificationResponse:
-    """Return the verification state. Chain trouble is a state, never an error response."""
+    """Return the verification state. Chain trouble is a state, never an error response.
+
+    Runs only in the scan-runner (app/verification/executor.py), never in the API.
+    """
     scan = session.get(Scan, scan_id)
     if scan is None:
         raise AppError(ErrorCode.SCAN_NOT_FOUND, "Scan not found", 404)
     row = session.scalars(
         select(BlockchainEvidence).where(BlockchainEvidence.scan_id == scan_id)
     ).first()
-    context = _Context(session, scan, row, provider, settings)
-    has_decision = session.scalars(
-        select(RiskDecision.id).where(RiskDecision.scan_id == scan_id)
-    ).first()
-    if row is None and (scan.status != ScanStatus.COMPLETED or has_decision is None):
+    context = _Context(session, scan, row, provider, digests)
+    if row is None and _not_anchorable(session, scan):
         return _not_anchored(context, "scan_not_anchorable", "This scan cannot have an anchor")
     if provider is None:
         return _unknown(context, "chain_provider_disabled", "Blockchain anchoring is disabled")
     try:
         return _verify_on_chain(context, provider)
+    except ClaimLost:
+        raise
     except AppError as exc:
         return _chain_failure(context, exc)
     except Exception:

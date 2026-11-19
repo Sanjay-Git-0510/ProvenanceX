@@ -30,7 +30,7 @@ from app.db.models import (
     Scan,
     utcnow,
 )
-from tests.conftest import make_anchorable_scan, write_scan_evidence
+from tests.conftest import make_anchorable_scan, rehash_source, write_scan_evidence
 
 pytestmark = pytest.mark.chain
 
@@ -94,7 +94,12 @@ def _scan(session, **kwargs):
 @pytest.fixture
 def settings(tmp_path):
     return get_settings().model_copy(
-        update={"blockchain_timeout_seconds": 20.0, "workspace_root": tmp_path / "workspaces"}
+        update={
+            "blockchain_timeout_seconds": 20.0,
+            "workspace_root": tmp_path / "workspaces",
+            # The in-process rehash worker (tests only) recomputes the digests.
+            "app_env": "test",
+        }
     )
 
 
@@ -235,7 +240,7 @@ def _anchored(session, settings, **kwargs):
 
 
 def _state(session, scan_id, settings, provider=None):
-    response = verify_scan(session, scan_id, provider or _provider(), settings)
+    response = verify_scan(session, scan_id, provider or _provider(), rehash_source(settings))
     return str(response.state), response.reason.code
 
 
@@ -298,7 +303,7 @@ TAMPERING = {
 
 def test_untouched_scan_verifies_on_the_real_chain(session, settings):
     scan_id, _, result = _anchored(session, settings)
-    response = verify_scan(session, scan_id, _provider(), settings)
+    response = verify_scan(session, scan_id, _provider(), rehash_source(settings))
     assert str(response.state) == "VERIFIED"
     assert {field.status for field in response.fields} == {"match"}
     assert response.tx_hash == result.tx_hash

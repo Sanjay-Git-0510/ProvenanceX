@@ -16,6 +16,7 @@ import threading
 import time
 from collections.abc import Callable
 
+from app.core.bounded import printable_excerpt
 from app.core.errors import AppError, ErrorCode
 from app.scanners.sandbox.base import SandboxRequest, SandboxRun
 from app.scanners.sandbox.hardening import (
@@ -194,9 +195,7 @@ class DockerSandboxProvider:
             if proc.poll() is None:
                 self._kill(name, proc)
         if code in _DOCKER_ERROR_RETURN_CODES:
-            logger.warning(
-                "docker run failed (%s): %s", code, stderr_head.decode("utf-8", "replace")
-            )
+            logger.warning("docker run failed (%s): %s", code, printable_excerpt(stderr_head))
             raise AppError(ErrorCode.SANDBOX_FAILED, "The sandbox could not be started", 502)
         if not raw:
             raise AppError(

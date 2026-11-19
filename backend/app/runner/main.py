@@ -12,6 +12,9 @@ Recovery (audit findings M1, M2), at startup and every RUNNER_RECONCILE_SECONDS 
      both replace the claim token, so a surviving old runner can no longer write to them;
   3. analyzer containers of this deployment that no longer belong to a live claim are removed;
   4. the workspaces of the scans failed in 1-2 are removed.
+Verification jobs (Milestone C1, audit finding M5) share the loop: each pass first takes one
+queued verification job (bounded by VERIFY_MAX_SECONDS), then one scan, so neither queue can
+starve the other. Steps 1-2 also fail this runner's orphaned and all stale verification jobs.
 On SIGTERM the runner finishes the current scan, then exits; Compose's stop_grace_period is set
 from RUNNER_MAX_SCAN_SECONDS. If it is killed anyway, the next start recovers as above.
 """
@@ -28,16 +31,23 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.analysis.factory import build_analyzer
 from app.analysis.reconcile import OrphanReconciler, ReconcileReport
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.database import get_sessionmaker
 from app.db.models import Scan, ScanStatus
 from app.pipeline.ownership import default_runner_id
-from app.pipeline.providers import build_providers
+from app.pipeline.providers import build_chain_provider, build_providers
 from app.pipeline.workspace import discard_workspace
 from app.runner.executor import run_claimed_scan
 from app.runner.queue import claim_next_scan, fail_stale_claims, recover_own_orphans
+from app.verification.executor import run_verification_job
+from app.verification.jobs import (
+    claim_next_verification,
+    fail_stale_verifications,
+    recover_own_verification_orphans,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +68,10 @@ def reconcile_once(
         recovered = recover_own_orphans(session, runner_id, (), quiet_seconds(settings))
         recovered += fail_stale_claims(
             session, settings.runner_stale_seconds, settings.runner_max_scan_seconds
+        )
+        recover_own_verification_orphans(session, runner_id, quiet_seconds(settings))
+        fail_stale_verifications(
+            session, settings.runner_stale_seconds, settings.verify_max_seconds
         )
         report = reconciler.reconcile(session)
     for scan_id in recovered:
@@ -107,10 +121,24 @@ def run_forever(settings: Settings, stop: threading.Event) -> None:
         logger.exception("Database unavailable at startup")
     next_reconcile = 0.0
     while not stop.is_set():
+        verify = None
         try:
             if time.monotonic() >= next_reconcile:
                 reconcile_once(session_factory, settings, runner_id, reconciler)
                 next_reconcile = time.monotonic() + settings.runner_reconcile_seconds
+            with session_factory() as session:
+                verify = claim_next_verification(session, runner_id)
+            if verify is not None:
+                logger.info("Claimed verification job %s (scan %s)", verify.job_id, verify.scan_id)
+                run_verification_job(
+                    verify,
+                    session_factory,
+                    settings,
+                    build_analyzer(settings),
+                    build_chain_provider(settings),
+                )
+            if stop.is_set():
+                break
             with session_factory() as session:
                 claim = claim_next_scan(session, runner_id)
         except SQLAlchemyError:
@@ -118,7 +146,8 @@ def run_forever(settings: Settings, stop: threading.Event) -> None:
             stop.wait(max(settings.runner_poll_seconds, 5.0))
             continue
         if claim is None:
-            stop.wait(settings.runner_poll_seconds)
+            if verify is None:
+                stop.wait(settings.runner_poll_seconds)
             continue
         logger.info("Claimed scan %s (claim %s)", claim.scan_id, claim.token)
         # Providers are rebuilt per scan so configuration and chain state are current.

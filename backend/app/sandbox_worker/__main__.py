@@ -1,5 +1,6 @@
 """Analyzer container entry point:
-`python -B -m app.sandbox_worker --deadline S --cpu-seconds C --mode extract|analyze|persist`.
+`python -B -m app.sandbox_worker --deadline S --cpu-seconds C --mode MODE`
+(MODE: extract, analyze, sbom, persist, rehash or hold).
 
 Reads one WorkerRequest (JSON) from stdin, runs the isolation self-check, then the requested
 mode against the fixed mount points, and writes exactly one framed result on stdout
@@ -27,6 +28,7 @@ __all__ = ["CPU_HARD_MARGIN_SECONDS", "main", "run", "supervise"]
 # Fixed mount points. They are not taken from the request.
 ARTIFACT_DIR = Path("/artifact")  # analyze, persist: the staging tree, read-only
 INPUT_UPLOAD = Path("/input/upload.zip")  # extract and analyze: the raw upload, read-only
+EVIDENCE_DIR = Path("/evidence")  # rehash: the scan's whole workspace, read-only
 OUT_SRC = Path("/out/src")  # extract: the staging volume; persist: the workspace src (writable)
 SCRATCH = Path("/tmp")  # noqa: S108 - size-limited noexec tmpfs
 SBOM_FILE = SCRATCH / "px-sbom.cdx.json"
@@ -47,7 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--deadline", type=positive, default=None)
     parser.add_argument("--cpu-seconds", type=positive, default=None)
-    parser.add_argument("--mode", choices=("extract", "analyze", "persist", "hold"), required=True)
+    parser.add_argument(
+        "--mode", choices=("extract", "analyze", "sbom", "persist", "rehash", "hold"), required=True
+    )
     args = parser.parse_args(argv)
     if args.deadline is not None:
         code = supervise(args.deadline, args.cpu_seconds)
@@ -70,7 +74,14 @@ def run(mode: str) -> int:
     if mode == "hold":
         return hold()
     # Imported here, after the deadline is armed (see the module docstring).
-    from app.sandbox_worker.collect import run_analyze, run_extract, run_persist, section_error
+    from app.sandbox_worker.collect import (
+        run_analyze,
+        run_extract,
+        run_persist,
+        run_rehash,
+        run_sbom,
+        section_error,
+    )
     from app.sandbox_worker.protocol import RESULT_FORMAT, WorkerRequest
     from app.sandbox_worker.selfcheck import (
         ANALYZER_CHECKS,
@@ -113,10 +124,16 @@ def run(mode: str) -> int:
         elif mode == "persist":
             persisted = run_persist(request, ARTIFACT_DIR, OUT_SRC)
             _emit({**base, "status": "ok", "persisted": persisted})
+        elif mode == "rehash":
+            _emit({**base, "status": "ok", "rehash": run_rehash(request, EVIDENCE_DIR)})
+        elif mode == "sbom":
+            # Syft alone, in its own container (audit finding M4); the SBOM is its own frame.
+            sbom_run = run_sbom(request, ARTIFACT_DIR, SCRATCH, sbom_out=SBOM_FILE)
+            sbom = SBOM_FILE if sbom_run.get("sbom") is not None else None
+            _emit({**base, "status": "ok", "sbom_run": sbom_run}, sbom)
         else:
-            analysis = run_analyze(request, ARTIFACT_DIR, INPUT_UPLOAD, SCRATCH, sbom_out=SBOM_FILE)
-            sbom = SBOM_FILE if analysis.get("sbom") is not None else None
-            _emit({**base, "status": "ok", "analysis": analysis}, sbom)
+            analysis = run_analyze(request, ARTIFACT_DIR, INPUT_UPLOAD, SCRATCH)
+            _emit({**base, "status": "ok", "analysis": analysis})
     except Exception as exc:  # noqa: BLE001 - reported as a structured error result
         _emit({**base, "status": "error", "error": section_error(exc)})
     return 0

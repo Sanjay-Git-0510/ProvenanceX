@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -141,11 +142,64 @@ def common_checks(label: str, body: dict, commit: str, expected_modes: list[str]
         code == 200 and chain.get("anchor_recorded"),
         chain.get("note"),
     )
-    code, verified = call("POST", f"/scans/{sid}/verify")
+    verified, job = verify(sid)
     check(
         f"{label}: verification state VERIFIED",
         verified.get("state") == "VERIFIED",
         (verified.get("state"), verified.get("reason")),
+    )
+    check(
+        f"{label}: verification ran in a verified rehash container",
+        job_ran_in_rehash_container(sid, job),
+        job.get("job_id"),
+    )
+
+
+def verify(sid: str, timeout: float = 600.0) -> tuple[dict, dict]:
+    """POST /verify queues a job (Milestone C1); poll it. Returns (answer, job)."""
+    code, job = call("POST", f"/scans/{sid}/verify")
+    if code not in (200, 202) or "job_id" not in job:
+        return {"state": None, "reason": (code, job)}, job
+    deadline = time.monotonic() + timeout
+    while job.get("status") in ("queued", "running") and time.monotonic() < deadline:
+        time.sleep(2)
+        _, job = call("GET", f"/scans/{sid}/verifications/{job['job_id']}")
+    return job.get("result") or {"state": None, "reason": job.get("status")}, job
+
+
+def job_ran_in_rehash_container(sid: str, job: dict) -> bool:
+    """The job's stored run record: one rehash container, runtime verified, exit 0."""
+    try:
+        job_id = str(uuid.UUID(str(job.get("job_id"))))
+    except ValueError:
+        return False
+    out = subprocess.run(  # noqa: S603 - fixed argv; job_id is a parsed UUID
+        [  # noqa: S607 - the docker CLI from PATH, as everywhere in these scripts
+            "docker",
+            "exec",
+            f"{PROJECT}-postgres-1",
+            "psql",
+            "-U",
+            "provenancex",
+            "-d",
+            "provenancex",
+            "-Atc",
+            f"SELECT sandbox::text FROM verification_runs WHERE id = '{job_id}'",  # noqa: S608
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        runs = json.loads(out.stdout.strip() or "null")["runs"]
+    except (ValueError, TypeError, KeyError):
+        return False
+    return (
+        len(runs) == 1
+        and runs[0].get("mode") == "rehash"
+        and runs[0].get("runtime_verified") is True
+        and runs[0].get("exit_code") == 0
+        and runs[0].get("runtime", {}).get("network") == "none"
     )
 
 
@@ -158,7 +212,7 @@ def main() -> int:
     # ---- GitHub
     _, created = call("POST", "/scans/software", {"source_url": GITHUB[0], "revision": GITHUB[1]})
     gh = wait(created["scan_id"])
-    common_checks("github", gh, GITHUB[1], ["hold", "fetch", "analyze", "persist"])
+    common_checks("github", gh, GITHUB[1], ["hold", "fetch", "analyze", "sbom", "persist"])
     with tempfile.TemporaryDirectory() as ref:
         readme = urllib.request.urlopen(  # noqa: S310 - fixed public URL
             f"https://raw.githubusercontent.com/octocat/Hello-World/{GITHUB[1]}/README", timeout=60

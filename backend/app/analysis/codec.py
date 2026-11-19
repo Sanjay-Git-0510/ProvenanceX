@@ -18,6 +18,38 @@ from app.scanners.static.analyzer import GroupedFinding, StaticResult
 from app.scanners.static.rules import Rule
 
 _SEVERITIES = frozenset({"HIGH", "MEDIUM", "LOW", "INFO", "CRITICAL"})
+# Upper bound for any count the analyzer reports (sanity, far above every real limit).
+MAX_COUNT = 10_000_000
+# The static feature vector: exactly these keys (audit finding M4).
+STATIC_COUNT_FEATURES = frozenset(
+    {
+        "dangerous_import_count",
+        "suspicious_api_count",
+        "archive_anomaly",
+        "script_count",
+        "bytecode_count",
+        "native_binary_count",
+        "files_analyzed",
+        "parse_errors",
+        "install_hook_count",
+    }
+)
+STATIC_FEATURES = STATIC_COUNT_FEATURES | {"script_presence", "pickle_dangerous_global_count"}
+SUMMARY_KEYS = frozenset(
+    {
+        "file_count",
+        "files_downloaded",
+        "weight_file_count",
+        "file_type_count",
+        "code_executing_formats",
+        "unverified_possibly_pickle",
+        "custom_code_present",
+        "model_card_completeness",
+        "license",
+    }
+)
+_MAX_DEPTH = 8
+_MAX_CONFIG_LIST = 64
 
 
 class _Bad(ValueError):
@@ -47,6 +79,71 @@ def _int(value: Any, *, optional: bool = False) -> Any:
     if isinstance(value, bool) or not isinstance(value, int):
         raise _Bad("expected an integer")
     return value
+
+
+def _count(value: Any, *, optional: bool = False) -> Any:
+    """A non-negative, bounded integer."""
+    value = _int(value, optional=optional)
+    if value is not None and not 0 <= value <= MAX_COUNT:
+        raise _Bad("count out of range")
+    return value
+
+
+def _size(value: Any) -> int:
+    """A file size in bytes: non-negative (remote files may be far larger than MAX_COUNT)."""
+    value = _int(value)
+    if value < 0:
+        raise _Bad("negative size")
+    return value
+
+
+def _json(value: Any, depth: int = 0) -> Any:
+    """Plain, bounded-depth JSON (dicts with string keys, lists, scalars, finite numbers)."""
+    if depth > _MAX_DEPTH:
+        raise _Bad("nested too deeply")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _str(key, limit=1024)
+            _json(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _json(item, depth + 1)
+    elif isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise _Bad("non-finite number")
+    elif not (value is None or isinstance(value, str | int | bool)):
+        raise _Bad("not JSON")
+    return value
+
+
+def _scalar(value: Any) -> Any:
+    if isinstance(value, str):
+        return _str(value, limit=256)
+    if isinstance(value, float):
+        return _json(value)
+    if value is None or isinstance(value, bool | int):
+        return value
+    raise _Bad("expected a scalar")
+
+
+def _config_value(value: Any) -> Any:
+    """Config fields are bounded scalars or short lists of them (config_parse._short)."""
+    if isinstance(value, list):
+        if len(value) > _MAX_CONFIG_LIST:
+            raise _Bad("config list too long")
+        return [_scalar(v) for v in value]
+    return _scalar(value)
+
+
+def _features(value: Any) -> dict[str, Any]:
+    features = _dict(value)
+    if set(features) != STATIC_FEATURES:
+        raise _Bad("unexpected static feature keys")
+    for key in STATIC_COUNT_FEATURES:
+        _count(features[key])
+    _bool(features["script_presence"])
+    _count(features["pickle_dangerous_global_count"], optional=True)
+    return features
 
 
 def _bool(value: Any, *, optional: bool = False) -> Any:
@@ -92,9 +189,9 @@ def static_from_dict(data: dict[str, Any]) -> StaticResult:
                         title=_str(rule["title"], limit=256),
                     ),
                     file=_str(item["file"]),
-                    occurrences=_int(item["occurrences"]),
-                    lines=[_int(n) for n in _list(item["lines"])],
-                    cells=[_int(n) for n in _list(item["cells"])],
+                    occurrences=_count(item["occurrences"]),
+                    lines=[_count(n) for n in _list(item["lines"])],
+                    cells=[_count(n) for n in _list(item["cells"])],
                     symbols=_strs(item["symbols"]),
                 )
             )
@@ -103,11 +200,11 @@ def static_from_dict(data: dict[str, Any]) -> StaticResult:
             entry = _dict(entry)
             not_analyzed.append({_str(k, limit=64): _str(v) for k, v in entry.items()})
         return StaticResult(
-            features=_dict(data["features"]),
+            features=_features(data["features"]),
             findings=findings,
             findings_truncated=_bool(data["findings_truncated"]),
             not_analyzed=not_analyzed,
-            not_analyzed_count=_int(data["not_analyzed_count"]),
+            not_analyzed_count=_count(data["not_analyzed_count"]),
             limitations=_strs(data["limitations"]),
         )
     except (_Bad, KeyError, TypeError) as exc:
@@ -118,7 +215,7 @@ def static_from_dict(data: dict[str, Any]) -> StaticResult:
 def _inventory(d: dict[str, Any]) -> InventoryFile:
     return InventoryFile(
         path=_str(d["path"]),
-        size=_int(d["size"]),
+        size=_size(d["size"]),
         category=_str(d["category"], limit=32),
         downloaded=_bool(d["downloaded"]),
         sha256=_str(d["sha256"], optional=True, limit=64),
@@ -128,7 +225,7 @@ def _inventory(d: dict[str, Any]) -> InventoryFile:
         hash_verified=_bool(d.get("hash_verified"), optional=True),
         skip_reason=_str(d.get("skip_reason"), optional=True, limit=512),
         format_mismatch=_str(d.get("format_mismatch"), optional=True, limit=512),
-        analysis=_dict(d.get("analysis") or {}),
+        analysis=_json(_dict(d.get("analysis") or {})),
     )
 
 
@@ -138,7 +235,7 @@ def _config(d: dict[str, Any]) -> ParsedConfig:
         path=_str(d["path"]),
         kind=_str(d["kind"], limit=32),
         valid=_bool(d["valid"]),
-        fields=_dict(d["fields"]),
+        fields={_str(k, limit=256): _config_value(v) for k, v in _dict(d["fields"]).items()},
         auto_map=auto_map,
         error=_str(d.get("error"), optional=True, limit=2000),
     )
@@ -148,10 +245,12 @@ def _card(d: dict[str, Any]) -> ModelCard:
     completeness = d["completeness"]
     if isinstance(completeness, bool) or not isinstance(completeness, int | float):
         raise _Bad("completeness")
+    if not 0 <= completeness <= 1:
+        raise _Bad("completeness out of range")
     return ModelCard(
         present=_bool(d["present"]),
         source=_str(d.get("source"), optional=True, limit=32),
-        metadata=_dict(d["metadata"]),
+        metadata=_json(_dict(d["metadata"])),
         fields_present=_strs(d["fields_present"]),
         sections_present=_strs(d["sections_present"]),
         completeness=float(completeness),
@@ -195,9 +294,32 @@ def _lineage(d: dict[str, Any]) -> LineageRef:
 
 
 def _adapter(value: Any) -> dict[str, Any]:
-    adapter = _dict(value)
+    adapter = _json(_dict(value))
     _str(adapter["config"])  # the lineage graph keys nested adapters by their config path
     return adapter
+
+
+def _summary(value: Any) -> None:
+    summary = _dict(value)
+    if set(summary) != SUMMARY_KEYS:
+        raise _Bad("unexpected AI-BOM summary keys")
+    for key in ("file_count", "files_downloaded", "weight_file_count", "file_type_count"):
+        _count(summary[key])
+    _count(summary["unverified_possibly_pickle"])
+    _bool(summary["custom_code_present"])
+    _strs(summary["code_executing_formats"])
+    completeness = summary["model_card_completeness"]
+    if completeness is not None and (
+        isinstance(completeness, bool)
+        or not isinstance(completeness, int | float)
+        or not 0 <= completeness <= 1
+    ):
+        raise _Bad("model card completeness")
+    _json(summary["license"])  # model-card metadata: a string, a list or absent
+    if summary["files_downloaded"] > summary["file_count"]:
+        raise _Bad("more downloaded files than files")
+    if summary["weight_file_count"] > summary["file_count"]:
+        raise _Bad("more weight files than files")
 
 
 def model_analysis_from_aibom(doc: dict[str, Any]) -> ModelAnalysis:
@@ -217,7 +339,7 @@ def model_analysis_from_aibom(doc: dict[str, Any]) -> ModelAnalysis:
             local_path_references=_strs(doc["local_path_references"]),
             limitations=_strs(doc["limitations"]),
         )
-        _dict(doc["summary"])
+        _summary(doc["summary"])
         _str(doc["format"], limit=64)
     except (_Bad, KeyError, TypeError) as exc:
         raise _invalid("AI-BOM") from exc

@@ -13,7 +13,7 @@ from app.blockchain.mock import MockChainProvider
 from app.blockchain.verification import verify_scan
 from app.core.errors import AppError, ErrorCode
 from app.db.models import AnchorStatus, ArtifactType, BlockchainEvidence, RiskDecision, Scan
-from tests.conftest import make_anchorable_scan, write_scan_evidence
+from tests.conftest import make_anchorable_scan, rehash_source, write_scan_evidence
 
 ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 BLOCK = "0x" + "0b" * 32
@@ -102,7 +102,7 @@ class Anchored:
 
     def verify(self, provider="default"):
         chain = self.chain if provider == "default" else provider
-        return verify_scan(self.session, self.scan_id, chain, self.settings)
+        return verify_scan(self.session, self.scan_id, chain, rehash_source(self.settings))
 
     def field(self, response, name):
         return next(item for item in response.fields if item.field == name)
@@ -507,14 +507,14 @@ def test_lost_mock_ledger_is_unknown(session, test_settings):
 @pytest.mark.parametrize("status", ["queued", "running", "failed"])
 def test_unfinished_scan_is_not_anchored(session, test_settings, chain, status):
     scan_id = make_anchorable_scan(session, status=status)
-    response = verify_scan(session, scan_id, chain, test_settings)
+    response = verify_scan(session, scan_id, chain, rehash_source(test_settings))
     assert _state(response) == ("NOT ANCHORED", "scan_not_anchorable")
     assert response.fields == []
 
 
 def test_scan_without_a_decision_is_not_anchored(session, test_settings, chain):
     scan_id = make_anchorable_scan(session, with_decision=False)
-    assert _state(verify_scan(session, scan_id, chain, test_settings)) == (
+    assert _state(verify_scan(session, scan_id, chain, rehash_source(test_settings))) == (
         "NOT ANCHORED",
         "scan_not_anchorable",
     )
@@ -522,7 +522,7 @@ def test_scan_without_a_decision_is_not_anchored(session, test_settings, chain):
 
 def test_completed_scan_with_no_anchor_is_not_anchored(session, test_settings, chain):
     scan_id = make_anchorable_scan(session)
-    assert _state(verify_scan(session, scan_id, chain, test_settings)) == (
+    assert _state(verify_scan(session, scan_id, chain, rehash_source(test_settings))) == (
         "NOT ANCHORED",
         "no_anchor",
     )
@@ -538,12 +538,15 @@ def test_completed_scan_with_no_anchor_is_not_anchored(session, test_settings, c
 def test_no_row_with_a_bad_chain_is_unknown(session, test_settings, chain, error, code):
     scan_id = make_anchorable_scan(session)
     chain.error = error
-    assert _state(verify_scan(session, scan_id, chain, test_settings)) == ("UNKNOWN", code)
+    assert _state(verify_scan(session, scan_id, chain, rehash_source(test_settings))) == (
+        "UNKNOWN",
+        code,
+    )
 
 
 def test_no_row_and_disabled_provider_is_unknown(session, test_settings):
     scan_id = make_anchorable_scan(session)
-    assert _state(verify_scan(session, scan_id, None, test_settings)) == (
+    assert _state(verify_scan(session, scan_id, None, rehash_source(test_settings))) == (
         "UNKNOWN",
         "chain_provider_disabled",
     )
@@ -591,5 +594,5 @@ def test_evidence_added_after_an_absent_anchor_is_a_mismatch(session, test_setti
 
 def test_unknown_scan_is_not_found(session, test_settings, chain):
     with pytest.raises(AppError) as caught:
-        verify_scan(session, uuid4(), chain, test_settings)
+        verify_scan(session, uuid4(), chain, rehash_source(test_settings))
     assert caught.value.code == "scan_not_found"

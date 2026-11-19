@@ -42,7 +42,7 @@ const verification = {
 
 function stubApi() {
   mockApi([
-    [/\/verify$/, verification],
+    [/\/verify$/, { job_id: "11111111-2222-3333-4444-555555555555", status: "completed", state: verification.state, result: verification }],
     [/\/graph$/, graph],
     [/\/blockchain$/, { anchor_recorded: false, record: null, note: "Stored data only." }],
     [/\/risk$/, riskResult()],

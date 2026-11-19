@@ -41,14 +41,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PX_ANALYZER_WORKER=1
 
 COPY --from=syft /usr/local/bin/syft /usr/local/bin/syft
-COPY requirements-analyzer.txt /opt/px/requirements-analyzer.txt
-RUN pip install --no-deps -r /opt/px/requirements-analyzer.txt \
+# Hash-locked (audit finding M6): an unlisted or altered wheel fails the build.
+COPY requirements-analyzer.lock /opt/px/requirements-analyzer.lock
+RUN pip install --require-hashes --no-deps -r /opt/px/requirements-analyzer.lock \
     && syft version >/dev/null
 
 # Application code only (no tests, no .env). Read-only for everyone.
 COPY app /opt/px/app
 RUN chmod -R a-w,a+rX /opt/px \
     && cd /opt/px && python -B -c "import app.sandbox_worker.__main__, app.sandbox_worker.collect"
+
+# I1: strip setuid/setgid bits (su, mount, passwd, ...); nothing here ever needs them.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && ! find / -xdev -perm /6000 -type f | grep -q .
 
 # The real uid comes from `docker create --user` and is never 0.
 USER 65534:65534

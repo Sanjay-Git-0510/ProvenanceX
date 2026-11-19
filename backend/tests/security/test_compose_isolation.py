@@ -59,8 +59,11 @@ def _stages(dockerfile: str) -> dict[str, str]:
 
 def test_docker_cli_exists_only_in_the_runner_stage():
     stages = _stages((ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8"))
-    assert set(stages) == {"base", "runner", "api"}
-    assert "download.docker.com" in stages["runner"] and "sha256sum -c" in stages["runner"]
+    # C3 (audit M6): the CLI is fetched and verified in a build stage, copied into the runner.
+    assert set(stages) == {"docker-cli", "base", "runner", "api"}
+    cli = stages["docker-cli"]
+    assert "download.docker.com" in cli and "sha256sum -c" in cli
+    assert "COPY --from=docker-cli /out/docker /usr/local/bin/docker" in stages["runner"]
     for stage in ("base", "api"):
         assert "download.docker.com" not in stages[stage]
         assert "/usr/local/bin/docker" not in stages[stage]
@@ -74,7 +77,7 @@ def test_analyzer_image_is_pinned_minimal_and_non_root():
     assert re.search(r"^FROM python:[\d.]+-slim-bookworm@sha256:[0-9a-f]{64}$", final, re.M)
     assert "USER 65534:65534" in final
     assert "PX_ANALYZER_WORKER=1" in final
-    assert "pip install --no-deps -r" in final
+    assert "pip install --require-hashes --no-deps -r" in final  # audit M6
     assert "curl" not in final.replace("curl never", "")
     reqs = (ROOT / "backend" / "requirements-analyzer.txt").read_text(encoding="utf-8")
     pins = [line for line in reqs.splitlines() if line and not line.startswith("#")]
@@ -133,7 +136,7 @@ def test_fetcher_image_is_pinned_minimal_and_non_root():
     assert re.search(r"^FROM python:[\d.]+-slim-bookworm@sha256:[0-9a-f]{64}$", text, re.M)
     assert "USER 65534:65534" in text
     assert "PX_FETCH_WORKER=1" in text
-    assert "pip install --no-deps -r" in text
+    assert "pip install --require-hashes --no-deps -r" in text  # audit M6
     code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
     assert "docker" not in code.replace("Dockerfile", "").lower()
     reqs = (ROOT / "backend" / "requirements-fetcher.txt").read_text(encoding="utf-8")

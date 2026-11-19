@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.analysis.base import AnalysisJob, AnalyzerRun, ContentAnalyzer, raise_if_error
+from app.analysis.consistency import check_analysis, check_sbom_run, contradiction
 from app.analysis.staging import DockerStaging
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
@@ -199,7 +200,35 @@ def extract_upload(
 def analyze_tree(
     session: Session, scan: Scan, analyzer: ContentAnalyzer, job: AnalysisJob
 ) -> AnalysisOut:
-    return run_sandboxed(session, scan, analyzer, job, "analyze").analysis
+    """Analyze, then require every section to agree with the tree (audit finding M4)."""
+    analysis = run_sandboxed(session, scan, analyzer, job, "analyze").analysis
+    check_analysis(analysis)
+    return analysis
+
+
+def generate_sbom(
+    session: Session,
+    scan: Scan,
+    analyzer: ContentAnalyzer,
+    job: AnalysisJob,
+    analysis: AnalysisOut,
+) -> AnalysisOut:
+    """Run Syft alone in the `sbom` container (audit finding M4) and attach its result.
+
+    The SBOM container's own tree digest must equal the analysis's. A Syft failure stays a
+    section error (the SBOM stage then fails); it is never replaced by anything.
+    """
+    run = run_sandboxed(session, scan, analyzer, job, "sbom").result.sbom_run
+    if run is None:  # guaranteed by WorkerResult for an ok sbom result
+        raise contradiction("the sbom container returned no result")
+    check_sbom_run(analysis, run)
+    return analysis.model_copy(
+        update={
+            "sbom_provider": run.sbom_provider,
+            "sbom": run.sbom,
+            "sbom_error": run.sbom_error,
+        }
+    )
 
 
 def persist_tree(

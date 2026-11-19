@@ -25,13 +25,18 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && git --version
 
-COPY requirements-fetcher.txt /opt/px/requirements-fetcher.txt
-RUN pip install --no-deps -r /opt/px/requirements-fetcher.txt
+# Hash-locked (audit finding M6): an unlisted or altered wheel fails the build.
+COPY requirements-fetcher.lock /opt/px/requirements-fetcher.lock
+RUN pip install --require-hashes --no-deps -r /opt/px/requirements-fetcher.lock
 
 # Application code only (no tests, no .env). Read-only for everyone.
 COPY app /opt/px/app
 RUN chmod -R a-w,a+rX /opt/px \
     && cd /opt/px && python -B -c "import app.fetch_worker.__main__, app.fetch_worker.run, app.scanners.hf.client"
+
+# I1: strip setuid/setgid bits (su, mount, passwd, ...); nothing here ever needs them.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && ! find / -xdev -perm /6000 -type f | grep -q .
 
 # The real uid comes from `docker create --user` and is never 0.
 USER 65534:65534
