@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
+from app.analysis.runtime_checks import common_hardening_problems
+from app.analysis.staging import VOLUME_PREFIX
 from app.core.errors import AppError, ErrorCode
 
 MB = 1024 * 1024
@@ -32,7 +34,8 @@ ARTIFACT_DST = "/artifact"
 INPUT_DST = "/input"
 OUT_DST = "/out/src"
 
-Mode = Literal["extract", "analyze"]
+Mode = Literal["extract", "analyze", "persist", "hold"]
+ENTRYPOINT = ["python", "-B", "-m", "app.sandbox_worker"]
 
 LABEL_ROLE = "io.provenancex.role"
 LABEL_INSTANCE = "io.provenancex.instance"
@@ -46,8 +49,9 @@ LABEL_KEYS = (LABEL_ROLE, LABEL_INSTANCE, LABEL_SCAN, LABEL_CLAIM, LABEL_MODE)
 MAX_DEADLINE_SECONDS = 24 * 3600
 MAX_CPU_SECONDS = 10 * MAX_DEADLINE_SECONDS
 MountKind = Literal["bind", "volume"]
+Subdir = Literal["src", "input", "staging"]
 
-_NAME_RE = re.compile(r"^px-ana-[0-9a-f-]{36}-(extract|analyze)$")
+_NAME_RE = re.compile(r"^px-ana-[0-9a-f-]{36}-(extract|analyze|persist|hold)$")
 _USER_RE = re.compile(r"^([1-9]\d*):([1-9]\d*)$")
 _MEMORY_RE = re.compile(r"^(\d+)m$")
 _TMPFS_RE = re.compile(rf"^/tmp:{TMPFS_OPTIONS},size=(\d+)m$")
@@ -56,6 +60,11 @@ _BIND_RE = re.compile(rf"^type=bind,src=(/[^,]+/({_UUID})/(src|input)),dst=([a-z
 _VOLUME_RE = re.compile(
     rf"^type=volume,src=([A-Za-z0-9][A-Za-z0-9_.-]*),dst=([a-z/]+),"
     rf"volume-subpath=({_UUID})/(src|input)(,readonly)?$"
+)
+# The scan's own tmpfs staging volume (app/analysis/staging.py), mounted whole, never copied
+# into from the image (volume-nocopy).
+_STAGING_RE = re.compile(
+    rf"^type=volume,src={VOLUME_PREFIX}({_UUID}),dst=([a-z/]+),volume-nocopy(,readonly)?$"
 )
 _REQUIRED = {
     "--network": "none",
@@ -80,10 +89,15 @@ _SINGLE_VALUED = frozenset(
     }
 )
 _REQUIRED_KEYS = frozenset({*_SINGLE_VALUED, *_VALUELESS, "--mount", "--label"})
-# Which mounts each mode needs: destination -> (workspace subdirectory, read-only?).
+# Which mounts each mode needs: destination -> (source, read-only?). "staging" is the scan's
+# kernel-capped tmpfs volume; "src"/"input" are its persistent workspace directories.
+#   extract  upload (ro) -> staging (rw)       analyze  staging (ro) [+ upload (ro)]
+#   persist  staging (ro) -> workspace src (rw)  hold   staging (ro): keeps the tmpfs mounted
 _MODE_MOUNTS: dict[str, dict[str, tuple[str, bool]]] = {
-    "extract": {INPUT_DST: ("input", True), OUT_DST: ("src", False)},
-    "analyze": {ARTIFACT_DST: ("src", True)},
+    "extract": {INPUT_DST: ("input", True), OUT_DST: ("staging", False)},
+    "analyze": {ARTIFACT_DST: ("staging", True)},
+    "persist": {ARTIFACT_DST: ("staging", True), OUT_DST: ("src", False)},
+    "hold": {ARTIFACT_DST: ("staging", True)},
 }
 _OPTIONAL_MOUNTS: dict[str, dict[str, tuple[str, bool]]] = {
     "analyze": {INPUT_DST: ("input", True)},
@@ -115,17 +129,22 @@ class AnalyzerLimits:
 
 @dataclass(frozen=True)
 class MountSpec:
-    """One workspace mount. `source` is a host path (bind) or a volume name (volume)."""
+    """One mount. `source` is a host path (bind) or a volume name (volume).
+
+    subdir "staging" is the scan's whole tmpfs staging volume (always kind "volume").
+    """
 
     kind: MountKind
     source: str
     target: str
-    subdir: str  # "src" | "input"
+    subdir: Subdir
     read_only: bool
     scan_id: UUID
 
     def flag(self) -> str:
         ro = ",readonly" if self.read_only else ""
+        if self.subdir == "staging":
+            return f"--mount=type=volume,src={self.source},dst={self.target},volume-nocopy{ro}"
         if self.kind == "bind":
             return f"--mount=type=bind,src={self.source},dst={self.target}{ro}"
         return (
@@ -244,13 +263,15 @@ def _parse_flags(argv: list[str]) -> tuple[dict[str, list[str]], list[str]]:
     return flags, argv[index:]
 
 
-def _parse_mount(value: str) -> tuple[str, str, bool]:
-    """Return (destination, workspace subdir, read-only) for an allowed mount value."""
+def _parse_mount(value: str) -> tuple[str, str, bool, str]:
+    """Return (destination, source kind, read-only, scan id) for an allowed mount value."""
+    if m := _STAGING_RE.match(value):
+        return m.group(2), "staging", m.group(3) is not None, m.group(1)
     if m := _BIND_RE.match(value):
-        return m.group(4), m.group(3), m.group(5) is not None
+        return m.group(4), m.group(3), m.group(5) is not None, m.group(2)
     if m := _VOLUME_RE.match(value):
-        return m.group(2), m.group(4), m.group(5) is not None
-    raise refuse("Only per-scan workspace mounts are allowed")
+        return m.group(2), m.group(4), m.group(5) is not None, m.group(3)
+    raise refuse("Only per-scan workspace and staging mounts are allowed")
 
 
 def _bounded_int(value: str, upper: int, what: str) -> int:
@@ -333,7 +354,9 @@ def assert_create_hardened(argv: list[str]) -> Mode:
     allowed = {**required, **_OPTIONAL_MOUNTS.get(mode, {})}
     seen: set[str] = set()
     for value in flags["--mount"]:
-        dst, subdir, read_only = _parse_mount(value)
+        dst, subdir, read_only, mount_scan = _parse_mount(value)
+        if mount_scan != scan_in_name:
+            raise refuse("Analyzer mount belongs to another scan", {"target": dst})
         if dst in seen or dst not in allowed:
             raise refuse("Unexpected analyzer mount", {"target": dst})
         if allowed[dst] != (subdir, read_only):
@@ -344,33 +367,58 @@ def assert_create_hardened(argv: list[str]) -> Mode:
     return mode  # type: ignore[return-value]
 
 
-def _expected_mounts(spec: AnalyzerSpec) -> set[tuple[str, str, str, bool, str]]:
-    return {
-        (
-            m.kind,
-            m.source if m.kind == "bind" else m.source,
-            m.target,
-            m.read_only,
-            f"{m.scan_id}/{m.subdir}" if m.kind == "volume" else "",
-        )
-        for m in spec.mounts
-    }
+MountTuple = tuple[str, str, str, bool, str, bool]
 
 
-def _actual_mounts(host: dict[str, Any]) -> set[tuple[str, str, str, bool, str]]:
+def expected_mounts(mounts: tuple["MountSpec", ...]) -> set[MountTuple]:
+    out = set()
+    for m in mounts:
+        staging = m.subdir == "staging"
+        subpath = f"{m.scan_id}/{m.subdir}" if m.kind == "volume" and not staging else ""
+        out.add((m.kind, m.source, m.target, m.read_only, subpath, staging))
+    return out
+
+
+# Docker Desktop (WSL 2) rewrites the source of a bind mount from a WSL distro into an opaque
+# path when the same container also mounts a named volume. Only this exact form is accepted in
+# place of the requested host path, and only for a bind the request contains (same target and
+# access mode). Compose deployments use volume mode and have no binds at all.
+DESKTOP_BIND_RE = re.compile(
+    r"^/run/desktop/mnt/host/wsl/docker-desktop-bind-mounts/[A-Za-z0-9_.-]{1,64}/[0-9a-f]{64}$"
+)
+DESKTOP_BIND = "<docker-desktop-rewritten>"
+
+
+def actual_mounts(host: dict[str, Any]) -> set[MountTuple]:
     out = set()
     for m in host.get("Mounts") or []:
         options = m.get("VolumeOptions") or {}
+        source = str(m.get("Source"))
+        if m.get("Type") == "bind" and DESKTOP_BIND_RE.match(source):
+            source = DESKTOP_BIND
         out.add(
             (
                 str(m.get("Type")),
-                str(m.get("Source")),
+                source,
                 str(m.get("Target")),
                 bool(m.get("ReadOnly")),
                 str(options.get("Subpath") or ""),
+                bool(options.get("NoCopy")),
             )
         )
     return out
+
+
+def mounts_match(host: dict[str, Any], mounts: tuple["MountSpec", ...]) -> bool:
+    """Exact match, except that a requested bind may appear in Docker Desktop's rewritten form."""
+    expected = expected_mounts(mounts)
+    actual = actual_mounts(host)
+    relaxed = {(k, DESKTOP_BIND if k == "bind" else src, *rest) for k, src, *rest in expected}
+    # Same number of mounts, and each one is either exactly as requested or a requested bind
+    # in Docker Desktop's form (distinct targets, so no two actual mounts match one request).
+    return len(actual) == len(expected) and all(
+        a in expected or (a[0] == "bind" and a in relaxed) for a in actual
+    )
 
 
 def verify_runtime_config(inspected: Any, spec: AnalyzerSpec) -> dict[str, Any]:
@@ -415,7 +463,8 @@ def verify_runtime_config(inspected: Any, spec: AnalyzerSpec) -> dict[str, Any]:
         "tmpfs differs",
     )
     check((host.get("LogConfig") or {}).get("Type") == "none", "container logging is on")
-    check(_actual_mounts(host) == _expected_mounts(spec), "mounts differ from the request")
+    check(mounts_match(host, spec.mounts), "mounts differ from the request")
+    check(list(config.get("Entrypoint") or []) == ENTRYPOINT, "entrypoint is not the worker")
     check(config.get("User") == f"{spec.uid}:{spec.gid}", "user differs")
     labels = config.get("Labels") or {}
     check(all(labels.get(k) == v for k, v in spec.labels.items()), "identifying labels differ")
@@ -426,6 +475,7 @@ def verify_runtime_config(inspected: Any, spec: AnalyzerSpec) -> dict[str, Any]:
     check(not any(_SECRET_ENV_RE.search(str(e).split("=", 1)[0]) for e in env), "secret-like env")
     blob = repr(info)
     check(SOCKET_MARKER not in blob, "the Docker socket is visible")
+    problems.extend(common_hardening_problems(info))  # audit finding L3
     if problems:
         raise refuse(
             "The created analyzer container is not hardened as required", {"failed": problems}

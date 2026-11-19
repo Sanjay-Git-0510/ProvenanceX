@@ -11,6 +11,8 @@ import shutil
 from pathlib import Path
 
 from app.scanners.hf.base import HfFetchLimits, HfFetchResult, HfFile
+from app.security.revision import is_commit_sha
+from app.security.sandbox_guard import require_fetch_context
 from app.security.url_validation import HfRepo
 
 MOCK_HF_REPO = Path(__file__).resolve().parent.parent / "mock_data" / "hf_mock_repo"
@@ -24,7 +26,9 @@ class MockHfProvider:
 
     def fetch(
         self, repo: HfRepo, revision: str | None, dest: Path, limits: HfFetchLimits
-    ) -> HfFetchResult:  # noqa: ARG002
+    ) -> HfFetchResult:
+        require_fetch_context()
+        pinned = revision.lower() if revision and is_commit_sha(revision) else None
         files: list[HfFile] = []
         commit = hashlib.sha1(b"provenancex-mock-hf", usedforsecurity=False)
         for src in sorted(p for p in self.fixture_dir.rglob("*") if p.is_file()):
@@ -51,7 +55,9 @@ class MockHfProvider:
         return HfFetchResult(
             source="mock",
             repo=repo,
-            commit_sha=commit.hexdigest(),
+            # Like the Hub, answer a full commit SHA with that commit; otherwise a commit derived
+            # from the fixture. Either way the result is tagged source="mock".
+            commit_sha=pinned or commit.hexdigest(),
             files=files,
             meta={
                 "repo_id": repo.repo_id,

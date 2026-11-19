@@ -3,6 +3,10 @@
 Real providers are the default. Mocks are used only when configured explicitly
 (SBOM_PROVIDER=mock / VULN_PROVIDER=mock / HF_PROVIDER=mock), never as a silent fallback
 when a real tool is missing. A missing tool shows up as an `unavailable` stage instead.
+
+Downloads (GitHub, Hugging Face, including HF_PROVIDER=mock) happen only in the isolated fetcher
+container (`fetcher`). The runner holds no download client: `hf` is set only by tests, which
+hand it to the pytest-only in-process fetcher.
 """
 
 from collections.abc import Callable
@@ -16,10 +20,10 @@ from app.blockchain.base import ChainProvider
 from app.blockchain.mock import MockChainProvider
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
+from app.fetch.base import Fetcher
+from app.fetch.factory import build_fetcher
 from app.pipeline.workspace import MB
 from app.scanners.hf.base import HfProvider
-from app.scanners.hf.client import HuggingFaceProvider
-from app.scanners.hf.mock import MockHfProvider
 from app.scanners.sandbox.base import SandboxProvider
 from app.scanners.sandbox.docker_provider import DockerSandboxProvider
 from app.scanners.sandbox.hardening import SandboxLimits
@@ -39,12 +43,27 @@ class ScanProviders:
     sbom: SbomProvider
     vulns: VulnProvider
     nvd: NvdEnricher | None
+    # Test hook only: the HF provider the in-process test fetcher uses. Never used by the
+    # runner itself; production builds leave it None.
     hf: HfProvider | None = None
     sandbox: SandboxProvider | None = None  # None: SANDBOX_PROVIDER=disabled
     chain: ChainProvider | None = None  # None: BLOCKCHAIN_PROVIDER=disabled
     # The isolated analyzer every content-reading step runs in. None is never a fallback:
     # require_analyzer() fails the scan with sandbox_unavailable.
     analyzer: ContentAnalyzer | None = None
+    # The isolated fetcher that downloads GitHub and Hugging Face artifacts. None is never a
+    # fallback: require_fetcher() fails the scan.
+    fetcher: Fetcher | None = None
+
+
+def require_fetcher(providers: ScanProviders) -> Fetcher:
+    if providers.fetcher is None:
+        raise AppError(
+            ErrorCode.SANDBOX_UNAVAILABLE,
+            "No isolated fetcher is configured; the artifact was not downloaded",
+            503,
+        )
+    return providers.fetcher
 
 
 def require_analyzer(providers: ScanProviders) -> ContentAnalyzer:
@@ -145,23 +164,22 @@ def build_providers(
                 _client_factory(settings, settings.nvd_timeout_seconds, transport),
                 settings.nvd_max_lookups,
             )
-    hf: HfProvider
-    if settings.hf_provider == "mock":
-        hf = MockHfProvider()
-    else:
-        hf = HuggingFaceProvider(
-            timeout_seconds=settings.hf_timeout_seconds,
-            max_retries=settings.http_max_retries,
-            max_api_bytes=settings.http_max_response_mb * MB,
-            user_agent=f"ProvenanceX/{settings.scanner_version} (supply-chain scanner)",
-            transport=transport,
-        )
     return ScanProviders(
         sbom=sbom,
         vulns=vulns,
         nvd=nvd,
-        hf=hf,
+        hf=None,
         sandbox=_sandbox(settings),
         chain=build_chain_provider(settings),
         analyzer=build_analyzer(settings),
+        fetcher=build_fetcher(settings, _engine_or_none(settings)),
     )
+
+
+def _engine_or_none(settings: Settings):  # noqa: ANN202 - Engine | None
+    """The engine used for cross-runner admission locks (PostgreSQL advisory locks)."""
+    if settings.fetcher_provider != "docker":
+        return None
+    from app.db.database import get_engine
+
+    return get_engine()

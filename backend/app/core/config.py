@@ -115,7 +115,10 @@ class Settings(BaseSettings):
     analyzer_cpus: float = Field(default=1.0, gt=0)
     analyzer_pids_limit: int = Field(default=128, gt=0)
     analyzer_tmp_mb: int = Field(default=256, gt=0)
-    analyzer_max_output_mb: int = Field(default=96, gt=0)
+    # Cap on the JSON envelope a worker returns (audit finding M3). The SBOM is no longer inside
+    # it: it is a separate frame capped by MAX_SBOM_MB and parsed in a child process.
+    analyzer_max_output_mb: int = Field(default=12, gt=0, le=64)
+    analyzer_persist_timeout_seconds: int = Field(default=120, gt=0)
     analyzer_max_stderr_kb: int = Field(default=256, gt=0)
     # How the per-scan workspace reaches the analyzer: "bind" (the runner runs on the host,
     # WORKSPACE_ROOT is a host path) or "volume" (the runner runs in Compose and the
@@ -128,6 +131,50 @@ class Settings(BaseSettings):
     analyzer_instance: str = Field(default="", max_length=63, pattern=r"^[A-Za-z0-9_.-]*$")
     # Extra CPU seconds above cpus x timeout before RLIMIT_CPU stops the worker.
     analyzer_cpu_grace_seconds: int = Field(default=30, ge=0)
+
+    # --- Staging storage (Milestone B, audit finding L1). Every artifact tree is written into
+    # its own Docker volume backed by a size-limited tmpfs, so the kernel enforces the cap.
+    # tmpfs lives in RAM: new volumes are admitted only while this deployment's staging volumes
+    # stay within STAGING_TOTAL_MB; otherwise the scan waits up to STAGING_WAIT_SECONDS.
+    staging_mb: int = Field(default=512, gt=0)
+    staging_total_mb: int = Field(default=1536, gt=0)
+    staging_wait_seconds: int = Field(default=300, ge=0)
+    # Persistent workspace budget: the kept trees of finished scans (needed by /verify). Before a
+    # new tree is persisted, the oldest finished scans' trees are pruned until it fits.
+    workspace_max_total_mb: int = Field(default=4096, gt=0)
+    # The untrusted SBOM is parsed in a child process with this address-space limit.
+    sbom_parse_memory_mb: int = Field(default=768, ge=128)
+    sbom_parse_timeout_seconds: int = Field(default=120, gt=0)
+
+    # --- Isolated fetcher (Milestone B, audit finding H1). GitHub and Hugging Face downloads
+    # run in a per-scan fetcher container with no Docker socket and no secrets, on an internal
+    # Docker network whose only exit is the egress proxy. "inprocess_test" runs the same worker
+    # code in-process and is refused unless APP_ENV=test inside a pytest run.
+    fetcher_provider: Literal["docker", "inprocess_test"] = "docker"
+    fetcher_image: str = "provenancex-fetcher:0.1.0"
+    fetcher_network: str = Field(
+        default="provenancex_fetch", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+    )
+    fetcher_proxy_url: str = Field(
+        default="http://egress-proxy:3128", pattern=r"^http://[a-z0-9.-]+:[0-9]{2,5}$"
+    )
+    fetcher_memory_mb: int = Field(default=1024, gt=0)
+    fetcher_cpus: float = Field(default=1.0, gt=0)
+    fetcher_pids_limit: int = Field(default=64, gt=0)
+    fetcher_tmp_mb: int = Field(default=64, gt=0)
+    fetcher_setup_seconds: int = Field(default=30, gt=0)
+    fetcher_host_grace_seconds: int = Field(default=15, gt=0)
+    fetcher_max_output_mb: int = Field(default=8, gt=0, le=32)
+    fetcher_max_concurrent: int = Field(default=2, gt=0)
+    fetcher_wait_seconds: int = Field(default=300, ge=0)
+    # Exact host names the egress proxy and the fetcher allow (no wildcards). The proxy reads
+    # the same list from its own environment (EGRESS_ALLOWED_HOSTS).
+    egress_allowed_hosts: Annotated[list[str], NoDecode] = [
+        "github.com",
+        "huggingface.co",
+        "us.aws.cdn.hf.co",
+        "cas-bridge.xethub.hf.co",
+    ]
 
     # --- Scan dispatch. "runner": the API only queues; the scan-runner service claims and
     # runs scans. "inline_test" runs the pipeline in an API background task and is refused
@@ -148,6 +195,11 @@ class Settings(BaseSettings):
     # Identity recorded on claims. Must be unique per runner replica; empty: the hostname
     # (in Compose, the container id, which survives a restart of the same container).
     runner_id: str = Field(default="", max_length=128)
+    # Watchdog (app/runner/watchdog.py): a sandbox step still running this long after its own
+    # deadline, or a scan past RUNNER_MAX_SCAN_SECONDS, is failed by the runner itself, its
+    # containers are removed, and the process exits so Compose restarts it.
+    runner_watchdog_grace_seconds: int = Field(default=60, gt=0)
+    runner_watchdog_exit_seconds: int = Field(default=30, gt=0)
 
     # --- Blockchain (Phase 7). "disabled" is the default. "mock" is an in-memory ledger tagged
     # source="mock", and is never a fallback. "web3" accepts only a local chain.
@@ -178,17 +230,55 @@ class Settings(BaseSettings):
         # round trip never fails a healthy scan.
         if self.runner_stale_seconds < 3 * self.runner_heartbeat_seconds:
             raise ValueError("RUNNER_STALE_SECONDS must be at least 3 x RUNNER_HEARTBEAT_SECONDS")
-        # A legitimate scan with both analyzer runs at their limits must fit in the ceiling.
+        # A legitimate scan with every sandbox step at its limit must fit in the ceiling:
+        # fetch or extract, then analyze, then persist.
         analyzer_budget = (
-            self.analyzer_extract_timeout_seconds
+            max(
+                self.analyzer_extract_timeout_seconds,
+                self.fetch_timeout_seconds("github"),
+                self.fetch_timeout_seconds("huggingface"),
+            )
             + self.analyzer_timeout_seconds
+            + self.analyzer_persist_timeout_seconds
             + 2 * self.analyzer_host_grace_seconds
+            + self.fetcher_host_grace_seconds
         )
         if self.runner_max_scan_seconds < analyzer_budget:
             raise ValueError(
-                "RUNNER_MAX_SCAN_SECONDS must cover both analyzer time limits plus their grace "
-                f"({analyzer_budget}s)"
+                "RUNNER_MAX_SCAN_SECONDS must cover the fetch, analyzer and persist time limits "
+                f"plus their grace ({analyzer_budget}s)"
             )
+        return self
+
+    def fetch_timeout_seconds(self, source: str) -> int:
+        """In-container deadline of one fetch: the source's own budget plus setup time."""
+        budget = (
+            self.git_clone_timeout_seconds
+            if source == "github"
+            else self.hf_download_timeout_seconds
+        )
+        return budget + self.fetcher_setup_seconds
+
+    @model_validator(mode="after")
+    def _storage_budgets(self) -> "Settings":
+        if self.staging_mb < self.max_artifact_size_mb:
+            raise ValueError("STAGING_MB must be at least MAX_ARTIFACT_SIZE_MB")
+        if self.staging_total_mb < self.staging_mb:
+            raise ValueError("STAGING_TOTAL_MB must be at least STAGING_MB")
+        # tmpfs pages are charged to the memory cgroup of the container that writes them.
+        if self.fetcher_memory_mb <= self.staging_mb:
+            raise ValueError("FETCHER_MEMORY_MB must be larger than STAGING_MB")
+        if self.analyzer_memory_mb <= self.staging_mb:
+            raise ValueError("ANALYZER_MEMORY_MB must be larger than STAGING_MB")
+        if self.workspace_max_total_mb < self.max_artifact_size_mb:
+            raise ValueError("WORKSPACE_MAX_TOTAL_MB must be at least MAX_ARTIFACT_SIZE_MB")
+        for host in self.egress_allowed_hosts:
+            if (
+                not host
+                or "*" in host
+                or not all(part and part.replace("-", "").isalnum() for part in host.split("."))
+            ):
+                raise ValueError(f"EGRESS_ALLOWED_HOSTS has an invalid host name: {host!r}")
         return self
 
     @model_validator(mode="after")
@@ -198,11 +288,15 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "ANALYZER_PROVIDER=inprocess_test is allowed only with APP_ENV=test"
                 )
+            if self.fetcher_provider == "inprocess_test":
+                raise ValueError(
+                    "FETCHER_PROVIDER=inprocess_test is allowed only with APP_ENV=test"
+                )
             if self.scan_dispatch == "inline_test":
                 raise ValueError("SCAN_DISPATCH=inline_test is allowed only with APP_ENV=test")
         return self
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "egress_allowed_hosts", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
         # Allow a comma-separated string in env vars.

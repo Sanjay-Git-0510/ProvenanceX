@@ -47,6 +47,8 @@ export SBOM_PROVIDER=syft VULN_PROVIDER=osv NVD_ENABLED=false HF_PROVIDER=hf
 export SANDBOX_PROVIDER=disabled
 # The demo keeps its own workspace volume, separate from a development stack's.
 export ANALYZER_WORKSPACE_VOLUME="${PROJECT}_workspace"
+# ...and its own fetch (internal) and egress networks.
+export FETCHER_NETWORK="${PROJECT}_fetch" EGRESS_NETWORK="${PROJECT}_egress"
 # The scan runner reaches Docker through the socket's group (it never runs as root).
 DOCKER_SOCKET_GID="${DOCKER_SOCKET_GID:-$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)}"
 export DOCKER_SOCKET_GID
@@ -82,8 +84,9 @@ contract=$(sed -n 's/.*"contract_address":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' <<<"
 }
 export BLOCKCHAIN_CONTRACT_ADDRESS="$contract"
 
-echo "Building the analyzer sandbox image"
+echo "Building the analyzer and fetcher sandbox images"
 compose --profile analyzer-image build analyzer-image
+compose --profile fetcher-image build fetcher-image
 
 echo "Building and starting the API, the scan runner and the UI"
 compose up --build --wait --wait-timeout 600 api scan-runner frontend

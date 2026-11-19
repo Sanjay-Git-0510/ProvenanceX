@@ -8,11 +8,13 @@ sandbox_unavailable and the scan fails. Nothing falls back to processing on the 
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import ValidationError
 
+from app.analysis.framing import FrameError, check_json_budget
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.pipeline.workspace import Workspace
@@ -29,6 +31,17 @@ from app.sandbox_worker.protocol import (
 logger = logging.getLogger(__name__)
 
 
+# Structural budget for the JSON envelope (app/analysis/framing.py, audit finding M3). Generous
+# for real results (a 20,000-file tree, a 2,000-file AI-BOM, 500 static findings), but it caps
+# how many Python objects a hostile envelope can expand into.
+ENVELOPE_MAX_CONTAINERS = 200_000
+ENVELOPE_MAX_ITEMS = 2_000_000
+ENVELOPE_MAX_DEPTH = 64
+# The raw SBOM frame the runner receives is spooled here (the scan's own workspace), never
+# held in memory, and parsed later in a memory-limited child process.
+SBOM_INCOMING = ".sbom-incoming.cdx.json"
+
+
 @dataclass(frozen=True)
 class AnalysisJob:
     scan_id: UUID
@@ -37,6 +50,13 @@ class AnalysisJob:
     has_upload: bool
     revision_requested: str | None = None
     model_context: dict[str, Any] | None = None
+    # The per-scan tmpfs staging volume (app/analysis/staging.py) that holds the artifact tree.
+    # None only for the in-process test executor, which uses workspace/src directly.
+    staging_volume: str | None = None
+
+    @property
+    def sbom_path(self) -> Path:
+        return self.workspace.root / SBOM_INCOMING
 
 
 @dataclass
@@ -95,7 +115,10 @@ def _reject_constant(value: str) -> Any:
 
 
 def parse_worker_output(raw: bytes, max_bytes: int, expected_mode: Mode) -> WorkerResult:
-    """Decode and validate untrusted analyzer output. Raises analyzer_output_invalid."""
+    """Decode and validate the untrusted JSON envelope. Raises analyzer_output_invalid.
+
+    `raw` is the envelope frame only (the framing layer already removed the SBOM frame).
+    """
 
     def invalid(reason: str) -> AppError:
         return AppError(
@@ -109,6 +132,15 @@ def parse_worker_output(raw: bytes, max_bytes: int, expected_mode: Mode) -> Work
         raise invalid("empty output")
     if len(raw) > max_bytes:
         raise invalid("output exceeds the size limit")
+    try:
+        check_json_budget(
+            raw,
+            max_containers=ENVELOPE_MAX_CONTAINERS,
+            max_items=ENVELOPE_MAX_ITEMS,
+            max_depth=ENVELOPE_MAX_DEPTH,
+        )
+    except FrameError as exc:
+        raise invalid(str(exc)) from exc
     try:
         data = json.loads(raw, parse_constant=_reject_constant)
     except (ValueError, RecursionError, UnicodeDecodeError) as exc:

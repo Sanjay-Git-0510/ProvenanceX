@@ -32,6 +32,51 @@ services:
     image: provenancex-analyzer:0.1.0
     profiles: ["analyzer-image"]
 
+  # Build-only service: docker compose --profile fetcher-image build fetcher-image
+  # GitHub and Hugging Face downloads run only in containers from this image (Milestone B).
+  fetcher-image:
+    build:
+      context: ./backend
+      dockerfile: ../docker/fetcher/Dockerfile
+    image: ${FETCHER_IMAGE:-provenancex-fetcher:0.1.0}
+    profiles: ["fetcher-image"]
+
+  # The only way out of the internal fetch network (docs/security/fetcher.md). HTTPS CONNECT
+  # only, to an exact host allowlist on port 443, after DNS + public-IP checks; connections are
+  # pinned to the validated address. It sits on the fetch network (internal: no route out) and
+  # its own egress network, never on the default network with Postgres, the API or the chain.
+  egress-proxy:
+    build:
+      context: ./backend
+      dockerfile: ../docker/egress-proxy/Dockerfile
+    image: provenancex-egress-proxy:0.1.0
+    environment:
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-github.com,huggingface.co,us.aws.cdn.hf.co,cas-bridge.xethub.hf.co}
+      EGRESS_ALLOWED_PORTS: "443"
+      EGRESS_CONNECT_TIMEOUT_SECONDS: ${EGRESS_CONNECT_TIMEOUT_SECONDS:-10}
+      EGRESS_IDLE_TIMEOUT_SECONDS: ${EGRESS_IDLE_TIMEOUT_SECONDS:-60}
+      EGRESS_MAX_TUNNEL_SECONDS: ${EGRESS_MAX_TUNNEL_SECONDS:-900}
+      EGRESS_MAX_TUNNEL_MB: ${EGRESS_MAX_TUNNEL_MB:-512}
+      EGRESS_MAX_CONNECTIONS: ${EGRESS_MAX_CONNECTIONS:-32}
+    networks:
+      fetch:
+        aliases: ["egress-proxy"]
+      egress: {}
+    read_only: true
+    user: "65534:65534"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
+    cpus: 0.5
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-B", "-m", "app.egress_proxy", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Local chain only, bound to loopback. It runs in memory, so a restart erases every anchor.
   hardhat:
     build: ./contracts
@@ -153,7 +198,9 @@ services:
       ANALYZER_CPUS: ${ANALYZER_CPUS:-1.0}
       ANALYZER_PIDS_LIMIT: ${ANALYZER_PIDS_LIMIT:-128}
       ANALYZER_TMP_MB: ${ANALYZER_TMP_MB:-256}
-      ANALYZER_MAX_OUTPUT_MB: ${ANALYZER_MAX_OUTPUT_MB:-96}
+      # Cap on the JSON envelope; the SBOM travels as its own frame (MAX_SBOM_MB) (audit M3).
+      ANALYZER_MAX_OUTPUT_MB: ${ANALYZER_MAX_OUTPUT_MB:-12}
+      ANALYZER_PERSIST_TIMEOUT_SECONDS: ${ANALYZER_PERSIST_TIMEOUT_SECONDS:-120}
       ANALYZER_MAX_STDERR_KB: ${ANALYZER_MAX_STDERR_KB:-256}
       # Inside Compose the workspace is the named volume below, mounted into analyzer
       # containers with volume-subpath=<scan_id>/src.
@@ -174,13 +221,43 @@ services:
       # Empty: the hostname, i.e. the container id, unique per replica. Only set it for a
       # single runner; replicas sharing an id would recover each other's claims.
       RUNNER_ID: ${RUNNER_ID:-}
+      # Watchdog: a sandbox step this long past its deadline (or a scan past the ceiling) is
+      # failed by the runner itself, and the runner exits so Compose restarts it.
+      RUNNER_WATCHDOG_GRACE_SECONDS: ${RUNNER_WATCHDOG_GRACE_SECONDS:-60}
+      RUNNER_WATCHDOG_EXIT_SECONDS: ${RUNNER_WATCHDOG_EXIT_SECONDS:-30}
+      # Kernel-capped staging (audit L1): one tmpfs volume of STAGING_MB per running scan, at
+      # most STAGING_TOTAL_MB of them in RAM; a scan waits STAGING_WAIT_SECONDS for room.
+      STAGING_MB: ${STAGING_MB:-512}
+      STAGING_TOTAL_MB: ${STAGING_TOTAL_MB:-1536}
+      STAGING_WAIT_SECONDS: ${STAGING_WAIT_SECONDS:-300}
+      # Persistent workspace budget for kept trees (oldest finished scans are pruned first).
+      WORKSPACE_MAX_TOTAL_MB: ${WORKSPACE_MAX_TOTAL_MB:-4096}
+      # The untrusted SBOM is parsed in a child process with this address-space limit.
+      SBOM_PARSE_MEMORY_MB: ${SBOM_PARSE_MEMORY_MB:-768}
+      SBOM_PARSE_TIMEOUT_SECONDS: ${SBOM_PARSE_TIMEOUT_SECONDS:-120}
+      # Isolated fetcher (audit H1): downloads run in per-scan fetcher containers on the
+      # internal fetch network, behind the egress proxy. There is no host-side download.
+      FETCHER_PROVIDER: docker
+      FETCHER_IMAGE: ${FETCHER_IMAGE:-provenancex-fetcher:0.1.0}
+      FETCHER_NETWORK: ${FETCHER_NETWORK:-provenancex_fetch}
+      FETCHER_PROXY_URL: http://egress-proxy:3128
+      FETCHER_MEMORY_MB: ${FETCHER_MEMORY_MB:-1024}
+      FETCHER_CPUS: ${FETCHER_CPUS:-1.0}
+      FETCHER_PIDS_LIMIT: ${FETCHER_PIDS_LIMIT:-64}
+      FETCHER_TMP_MB: ${FETCHER_TMP_MB:-64}
+      FETCHER_SETUP_SECONDS: ${FETCHER_SETUP_SECONDS:-30}
+      FETCHER_HOST_GRACE_SECONDS: ${FETCHER_HOST_GRACE_SECONDS:-15}
+      FETCHER_MAX_OUTPUT_MB: ${FETCHER_MAX_OUTPUT_MB:-8}
+      FETCHER_MAX_CONCURRENT: ${FETCHER_MAX_CONCURRENT:-2}
+      FETCHER_WAIT_SECONDS: ${FETCHER_WAIT_SECONDS:-300}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-github.com,huggingface.co,us.aws.cdn.hf.co,cas-bridge.xethub.hf.co}
     volumes:
       - ./ml/models:/app/ml/models:ro
       # Off-chain evidence, kept so that verification can recompute hashes. A named volume, never
       # a host bind mount. Holds untrusted artifacts until `docker compose down -v`.
       - workspace:/app/workspace
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -212,6 +289,11 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
+    # Bounds the runner itself (audit M3): it never parses large untrusted JSON in-process; the
+    # SBOM is parsed in a child limited to SBOM_PARSE_MEMORY_MB.
+    mem_limit: ${RUNNER_MEMORY_LIMIT:-1536m}
+    memswap_limit: ${RUNNER_MEMORY_LIMIT:-1536m}
+    pids_limit: 256
     # Come back after a crash: startup recovery then fails the interrupted scan, replaces its
     # claim and removes its analyzer containers. `docker compose stop` still stops it for good.
     restart: unless-stopped
@@ -224,13 +306,15 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+      egress-proxy:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
     environment:
       API_PROXY_TARGET: http://api:8000
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-5173}:5173"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -239,6 +323,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+networks:
+  # Internal: Docker gives it no route to the internet or to any other network. Fetcher
+  # containers (attached by the runner) and the egress proxy are its only members.
+  fetch:
+    name: ${FETCHER_NETWORK:-provenancex_fetch}
+    internal: true
+  # The egress proxy's own way out. Nothing else is attached to it.
+  egress:
+    name: ${EGRESS_NETWORK:-provenancex_egress}
 
 volumes:
   pgdata:

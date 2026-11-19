@@ -14,6 +14,9 @@ from app.core.errors import AppError, ErrorCode
 from app.scanners import git_fetch
 from app.scanners.git_fetch import CloneLimits, clone_repository, git_base_command, git_env
 
+# Download code runs only in the fetcher container or this pytest-only context.
+pytestmark = pytest.mark.usefixtures("fetch_test_context")
+
 requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 LIMITS = CloneLimits(timeout_seconds=30, max_bytes=5 * 1024 * 1024, poll_interval=0.05)
 

@@ -6,9 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# git is required for hardened shallow clones of GitHub sources (app/scanners/git_fetch.py).
+# No git: the API and the scan-runner never clone or download artifacts. Downloads run only in
+# the isolated fetcher image (docker/fetcher, Milestone B, audit finding H1).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Syft (SBOM generation, app/scanners/sbom/syft.py). The version and the per-arch SHA-256

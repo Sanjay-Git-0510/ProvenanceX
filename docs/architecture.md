@@ -26,15 +26,22 @@ step that reads artifact content runs in a per-scan analyzer container
 (`app/sandbox_worker`, `docker/analyzer`). Only the runner holds the Docker socket.
 
 ```
-API (queue) -> Postgres -> scan-runner -> analyzer container (no network, read-only, non-root)
-                                       <- validated JSON only
+API (queue) -> Postgres -> scan-runner -> fetcher container (internal network) -> egress proxy -> GitHub / HF
+                                       -> analyzer containers (no network, read-only, non-root)
+                                       <- small, framed, schema-validated results only
 ```
+
+Since Milestone B (2026-11-19, [docs/security/fetcher.md](security/fetcher.md)), downloads also leave the runner:
+a per-scan fetcher container on a Docker `internal` network, whose only exit is an allowlisting egress proxy, writes
+into a per-scan, kernel-capped tmpfs staging volume. The runner has no git and never opens downloaded files.
 
 | Component | Tech | Responsibility |
 |---|---|---|
 | API | FastAPI + Pydantic | Input validation, scan endpoints, structured errors. Queues scans; never reads artifact content |
 | Scan runner | `app/runner` | Claims queued scans, runs the pipeline, launches and verifies analyzer containers (only holder of the Docker socket) |
 | Analyzer sandbox | `app/sandbox_worker`, `app/analysis` | Extraction, hashing, Syft, AI-BOM, pickle/safetensors parsing, static analysis, in a disposable container; output size-capped and schema-validated |
+| Fetcher | `app/fetch_worker`, `app/fetch`, `docker/fetcher` | GitHub and Hugging Face downloads in a disposable container on the internal fetch network; no socket, no secrets |
+| Egress proxy | `app/egress_proxy`, `docker/egress-proxy` | The fetch network's only exit: HTTPS CONNECT to an exact host allowlist, public-IP checks, pinned addresses, caps |
 | Pipeline | Python module | Runs the 22 steps in CLAUDE.md's fixed order |
 | Security | `app/security` | URL allowlist, SSRF checks, archive validation, size/count limits |
 | Scanners | `app/scanners` | SBOM (Syft/CycloneDX), AI-BOM, OSV/NVD, provenance, static, sandbox |
@@ -63,7 +70,8 @@ CVSS, the ML probability, the anomaly score and the ProvenanceX risk score stay 
 1. **Every artifact is untrusted.** Downloads, uploads, archives and model files are only parsed, never executed on the host. `pickle.load`, `torch.load` and `trust_remote_code` are forbidden. Pickles are inspected with `pickletools` opcode parsing.
 2. **Input boundary (`app/security`):**
    - URLs: https only, allowlist limited to `github.com` and `huggingface.co`, and private, loopback and link-local IPs are rejected after DNS resolution.
-   - Git clones: shallow, no submodules, hooks disabled, with size and time limits.
+   - Git clones and HF downloads: only in the fetcher container (shallow, no submodules, hooks disabled, size and
+     time limits), through the egress proxy, into a kernel-capped staging volume.
    - Archives: path traversal, absolute paths, symlinks and decompression bombs are rejected, and `MAX_ARTIFACT_SIZE_MB` and `MAX_ARTIFACT_FILES` are enforced.
 3. **Analyzer boundary (content analysis):** every step that reads artifact content runs in a disposable analyzer
    container: `--network=none`, read-only root, non-root, `cap-drop ALL`, `no-new-privileges`, memory/CPU/pids

@@ -9,12 +9,14 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
-from app.pipeline.providers import build_providers
 from app.scanners.hf.base import HfFetchLimits
 from app.scanners.model.aibom import ModelContext, analyze_model
 from app.security.url_validation import validate_hf_repo_url
 
-pytestmark = pytest.mark.network
+# Client-logic tests against the real Hub, from the test process (pytest-only fetch context).
+# In production this client runs only inside the fetcher container, behind the egress proxy:
+# that path is covered by tests/integration/test_fetcher_live.py.
+pytestmark = [pytest.mark.network, pytest.mark.usefixtures("fetch_test_context")]
 
 TINY_MODEL = "https://huggingface.co/hf-internal-testing/tiny-random-gpt2"
 MB = 1024 * 1024
@@ -24,7 +26,15 @@ LIMITS = HfFetchLimits(
 
 
 def provider():
-    return build_providers(Settings(_env_file=None, hf_provider="hf", nvd_enabled=False)).hf
+    from app.scanners.hf.client import HuggingFaceProvider
+
+    settings = Settings(_env_file=None)
+    return HuggingFaceProvider(
+        timeout_seconds=settings.hf_timeout_seconds,
+        max_retries=settings.http_max_retries,
+        max_api_bytes=settings.http_max_response_mb * MB,
+        user_agent="ProvenanceX-tests",
+    )
 
 
 def test_live_fetch_verifies_downloads_and_never_exceeds_caps(tmp_path):

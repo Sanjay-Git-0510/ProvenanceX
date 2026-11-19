@@ -1,5 +1,9 @@
 """Real Hugging Face provider: Hub API metadata plus a capped, verified file download.
 
+Runs only inside the isolated fetcher container (require_fetch_context), never in the
+scan-runner (audit finding H1). There, every request goes through the egress proxy (`proxy`),
+which also re-validates each destination's DNS and IP addresses.
+
 Safety rules (CLAUDE.md boundaries 1-4, 8):
 - Only https://huggingface.co is contacted directly. The host is fixed in code.
 - Redirects are followed manually (at most MAX_REDIRECTS hops). Every hop must be https
@@ -31,6 +35,7 @@ import httpx
 from app.core.errors import AppError, ErrorCode
 from app.scanners.hf.base import HfFetchLimits, HfFetchResult, HfFile
 from app.security.archive import normalize_member_name
+from app.security.sandbox_guard import require_fetch_context
 from app.security.url_validation import HF_HOST, HfRepo, validate_hf_redirect_url
 
 logger = logging.getLogger(__name__)
@@ -82,6 +87,8 @@ class HuggingFaceProvider:
         check_dns: bool = True,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        proxy: str | None = None,
+        allowed_hosts: frozenset[str] | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
@@ -91,6 +98,9 @@ class HuggingFaceProvider:
         self.check_dns = check_dns
         self.sleep = sleep
         self.clock = clock
+        self.proxy = proxy
+        # Redirect targets must also be on the deployment's egress allowlist (exact names).
+        self.allowed_hosts = allowed_hosts
 
     # ------------------------------------------------------------------ API (JSON)
     def _client(self) -> httpx.Client:
@@ -99,6 +109,8 @@ class HuggingFaceProvider:
             follow_redirects=False,
             headers={"User-Agent": self.user_agent},
             transport=self.transport,
+            proxy=self.proxy if self.transport is None else None,
+            trust_env=False,
         )
 
     def _api(self, client: httpx.Client, url: str) -> tuple[Any, httpx.Headers]:
@@ -262,11 +274,15 @@ class HuggingFaceProvider:
                             raise _DownloadError("failed", "redirect without a location")
                         nxt = urljoin(url, location)
                         try:
-                            validate_hf_redirect_url(nxt, check_dns=self.check_dns)
+                            host = validate_hf_redirect_url(nxt, check_dns=self.check_dns)
                         except AppError as exc:
                             raise _DownloadError(
                                 "rejected", f"redirect refused: {exc.message}"
                             ) from exc
+                        if self.allowed_hosts is not None and host not in self.allowed_hosts:
+                            raise _DownloadError(
+                                "rejected", "redirect refused: host is not on the egress allowlist"
+                            )
                         url = nxt
                         continue
                     if resp.status_code != 200:
@@ -314,6 +330,7 @@ class HuggingFaceProvider:
     def fetch(
         self, repo: HfRepo, revision: str | None, dest: Path, limits: HfFetchLimits
     ) -> HfFetchResult:
+        require_fetch_context()
         dest_root = dest.resolve()
         deadline = self.clock() + limits.timeout_seconds
         with self._client() as client:

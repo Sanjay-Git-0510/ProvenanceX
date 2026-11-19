@@ -165,19 +165,25 @@ def validate_github_repo_url(raw: object, *, check_dns: bool = True) -> GitHubRe
 # --------------------------------------------------------------------------- Hugging Face
 HF_HOST = "huggingface.co"
 HF_HOSTS = frozenset({HF_HOST})
-# Download redirects may only go to Hugging Face's own hosts. LFS/Xet content is served
-# from HF-owned CDN hosts under hf.co (e.g. us.aws.cdn.hf.co) or the legacy
-# cdn-lfs*.huggingface.co hosts. This list is fixed in code, not configurable.
+# Download redirects may only go to Hugging Face's own hosts, listed exactly (Milestone B
+# removed the former `*.hf.co` wildcard). LFS/Xet content was observed (2026-11-19) to redirect
+# to us.aws.cdn.hf.co; small files redirect to huggingface.co itself. The other entries are
+# HF CDN hosts used in other regions or earlier. The egress proxy enforces its own exact
+# allowlist (EGRESS_ALLOWED_HOSTS) as well, and a redirect must pass both.
 HF_REDIRECT_EXACT_HOSTS = frozenset(
     {
         HF_HOST,
+        "us.aws.cdn.hf.co",
+        "eu.aws.cdn.hf.co",
+        "cdn-lfs.hf.co",
+        "cdn-lfs-us-1.hf.co",
+        "cdn-lfs-eu-1.hf.co",
         "cdn-lfs.huggingface.co",
         "cdn-lfs-us-1.huggingface.co",
         "cdn-lfs-eu-1.huggingface.co",
         "cas-bridge.xethub.hf.co",
     }
 )
-HF_REDIRECT_HOST_SUFFIXES = (".hf.co",)
 
 # First path segments that are HF site routes, not repository owners or legacy repo ids.
 _HF_RESERVED = frozenset(
@@ -260,10 +266,7 @@ def validate_hf_repo_url(raw: object, *, check_dns: bool = True) -> HfRepo:
 
 
 def is_allowed_hf_redirect_host(host: str) -> bool:
-    host = host.lower()
-    return host in HF_REDIRECT_EXACT_HOSTS or (
-        host.endswith(HF_REDIRECT_HOST_SUFFIXES) and host.count(".") <= 5
-    )
+    return host.lower() in HF_REDIRECT_EXACT_HOSTS
 
 
 def validate_hf_redirect_url(url: str, *, check_dns: bool = True) -> str:

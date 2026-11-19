@@ -13,7 +13,7 @@ import pytest
 from app.core.errors import AppError, ErrorCode
 from app.core.hashing import tree_digest
 from app.db.models import Artifact, Scan
-from app.pipeline import software as software_pipeline
+from app.fetch import inprocess as fetch_inprocess
 from app.scanners.git_fetch import CloneResult
 from tests.conftest import SIMPLE_PROJECT, build_zip, zip_dir
 
@@ -43,7 +43,7 @@ def fake_clone(monkeypatch):
         shutil.copytree(SIMPLE_PROJECT, dest, dirs_exist_ok=True)
         return CloneResult(commit_sha="c" * 40, revision=revision)
 
-    monkeypatch.setattr(software_pipeline, "clone_repository", _clone)
+    monkeypatch.setattr(fetch_inprocess, "clone_repository", _clone)
     return calls
 
 
@@ -129,7 +129,7 @@ def test_clone_failure_recorded_and_workspace_removed(scan_client, test_settings
     def _fail(*args, **kwargs):
         raise AppError(ErrorCode.CLONE_FAILED, "git command failed", 502, {"returncode": 128})
 
-    monkeypatch.setattr(software_pipeline, "clone_repository", _fail)
+    monkeypatch.setattr(fetch_inprocess, "clone_repository", _fail)
     resp = scan_client.post(URL, data={"source_url": "https://github.com/acme/widget"})
     body = _get(scan_client, resp.json()["scan_id"]).json()
     assert body["status"] == "failed"
@@ -146,7 +146,7 @@ def test_unexpected_error_is_generic(scan_client, monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("secret internal detail")
 
-    monkeypatch.setattr(software_pipeline, "clone_repository", _boom)
+    monkeypatch.setattr(fetch_inprocess, "clone_repository", _boom)
     resp = scan_client.post(URL, data={"source_url": "https://github.com/acme/widget"})
     body = _get(scan_client, resp.json()["scan_id"]).json()
     assert body["status"] == "failed"
@@ -272,3 +272,19 @@ def test_get_invalid_scan_id(scan_client):
     resp = _get(scan_client, "not-a-uuid")
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "validation_error"
+
+
+def test_fetcher_reporting_another_commit_than_the_pinned_one_fails(scan_client, monkeypatch):
+    """The runner does not trust the fetcher's commit check: a pinned SHA is re-checked."""
+
+    def _clone(url, dest, revision, limits, **kwargs):
+        shutil.copytree(SIMPLE_PROJECT, dest, dirs_exist_ok=True)
+        return CloneResult(commit_sha="d" * 40, revision=revision)
+
+    monkeypatch.setattr(fetch_inprocess, "clone_repository", _clone)
+    resp = scan_client.post(
+        URL, data={"source_url": "https://github.com/acme/widget", "revision": "a" * 40}
+    )
+    body = _get(scan_client, resp.json()["scan_id"]).json()
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "fetch_output_invalid"

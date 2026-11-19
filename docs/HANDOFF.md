@@ -2,7 +2,22 @@
 
 ## STATUS
 
-_Last updated: 2026-11-18_
+_Last updated: 2026-11-19_
+
+- **Master-prompt Phase 1, Milestone B (isolated downloads): implemented 2026-11-19, uncommitted, awaiting owner
+  review.** Milestone C is not started. Details, controls and test table: [security/fetcher.md](security/fetcher.md).
+  - H1: GitHub/HF downloads run only in a per-scan fetcher container (`docker/fetcher`, `app/fetch_worker`,
+    `app/fetch`) on a Docker `internal` network whose only exit is a standard-library egress proxy
+    (`docker/egress-proxy`, `app/egress_proxy`: exact host allowlist, port 443, single DNS resolution, public-IP
+    check, pinned address, caps). The runner image has no git; download code refuses to run outside the fetcher.
+  - L1: every artifact tree lives in a per-scan tmpfs Docker volume (`STAGING_MB`, kernel `ENOSPC`), kept mounted by
+    a `hold` container; RAM budget `STAGING_TOTAL_MB`; `persist` copies the bounded tree to the workspace (budget
+    `WORKSPACE_MAX_TOTAL_MB`, oldest finished trees pruned).
+  - L2 exact self-check keys + strict booleans; L3 inspect checks (`app/analysis/runtime_checks.py`); M3 framed
+    worker output, SBOM as its own frame parsed in a memory-limited child, runner `mem_limit`.
+  - Watchdog (`app/runner/watchdog.py`) fails a hung scan despite a fresh heartbeat and restarts a wedged runner.
+  - The Docker Desktop restart test needs a manual restart: `scripts/milestone_b/docker_restart_pre.sh`, restart,
+    `scripts/milestone_b/docker_restart_post.sh`.
 
 - **Master-prompt rework (2026-11-18), Phase 1 Milestone A (sandbox-only content analysis): done, awaiting
   owner review.** Milestones B (fetch container + egress proxy) and C (expanded live tests, docs) are not started.

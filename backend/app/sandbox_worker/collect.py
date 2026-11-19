@@ -1,9 +1,13 @@
 """Collect artifact evidence. Runs only inside the analyzer container (or the pytest-only
 in-process executor), never in the API or the scan-runner.
 
-Two modes, each a separate container run:
-  extract  the raw upload (read-only) -> the per-scan src directory (the only writable mount).
-  analyze  the src directory (read-only) -> one JSON result on stdout. Nothing is written.
+Three modes, each a separate container run:
+  extract  the raw upload (read-only) -> the per-scan staging tmpfs volume (the only writable
+           mount; its size is capped by the kernel, audit finding L1).
+  analyze  the staging tree (read-only) -> one framed result on stdout; the SBOM is written to
+           the container's own /tmp and sent as a separate frame (audit finding M3).
+  persist  the staging tree (read-only) -> a bounded copy in the persistent workspace, so that
+           /verify can re-hash it later. Returns the digest of what was written.
 
 Each evidence section (SBOM, AI-BOM, static, config digest, declared versions) is captured on
 its own. A failing section becomes a structured section error, so one failing tool is recorded
@@ -11,7 +15,11 @@ as that stage's failure on the host, exactly as before, and never fails the whol
 failure to read the tree itself (unsafe content, too many files) fails the analysis.
 """
 
+import errno
+import hashlib
 import logging
+import os
+import stat
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -30,7 +38,7 @@ from app.scanners.sbom.base import SbomProvider
 from app.scanners.sbom.mock import MockSbomProvider
 from app.scanners.sbom.syft import SyftProvider
 from app.scanners.static.analyzer import StaticLimits, StaticResult, analyze_artifact
-from app.security.archive import ArchiveLimits, safe_extract_zip
+from app.security.archive import ArchiveLimits, safe_extract_zip, storage_limit_error
 from app.security.sandbox_guard import require_worker_context
 
 logger = logging.getLogger(__name__)
@@ -45,6 +53,8 @@ def settings_for(request: WorkerRequest) -> Settings:
 
 
 def section_error(exc: BaseException) -> dict[str, Any]:
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        exc = storage_limit_error()
     if isinstance(exc, AppError):
         return {"code": str(exc.code), "message": exc.message[:2000], "details": exc.details}
     # The traceback goes to stderr (captured, capped and logged by the runner), not the result.
@@ -87,16 +97,23 @@ def _sbom_provider(s: Settings) -> SbomProvider:
     return SyftProvider(s.syft_path, s.syft_timeout_seconds, s.max_sbom_mb * MB)
 
 
-def _sbom(s: Settings, src: Path, scratch: Path, provider: SbomProvider) -> dict[str, Any]:
+def _sbom(
+    s: Settings, src: Path, scratch: Path, provider: SbomProvider, sbom_out: Path
+) -> dict[str, Any]:
+    """Generate the SBOM and write its raw bytes to `sbom_out` (sent as its own frame)."""
     result = provider.generate(src, scratch)
     if len(result.raw) > s.max_sbom_mb * MB:
         raise AppError(ErrorCode.SBOM_TOO_LARGE, "SBOM exceeds the size limit", 502)
     try:
-        raw = result.raw.decode("utf-8")
+        result.raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise AppError(ErrorCode.SBOM_PARSE_ERROR, "SBOM is not valid UTF-8", 502) from exc
+    fd = os.open(sbom_out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(result.raw)
     return {
-        "raw": raw,
+        "size": len(result.raw),
+        "sha256": hashlib.sha256(result.raw).hexdigest(),
         "source": result.source,
         "tool_name": result.tool_name,
         "tool_version": result.tool_version,
@@ -184,10 +201,12 @@ def run_analyze(
     upload_path: Path | None,
     scratch: Path,
     *,
+    sbom_out: Path,
     sbom_provider: SbomProvider | None = None,
 ) -> dict[str, Any]:
     """Analyze the artifact tree at `src`. Raises AppError only if the tree is unreadable.
 
+    The raw SBOM (software only) is written to `sbom_out`, a path that must not exist yet.
     `sbom_provider` is a test hook used only by the in-process test executor; the container
     always builds its provider from the request.
     """
@@ -221,7 +240,9 @@ def run_analyze(
         ]
         provider = sbom_provider or _sbom_provider(s)
         out["sbom_provider"] = str(provider.name)[:32]
-        out["sbom"], out["sbom_error"] = _section(lambda: _sbom(s, src, scratch, provider))
+        out["sbom"], out["sbom_error"] = _section(
+            lambda: _sbom(s, src, scratch, provider, sbom_out)
+        )
     else:
         ctx = _model_context(request)
         analysis, out["aibom_error"] = _section(lambda: analyze_model(src, ctx, s))
@@ -240,3 +261,86 @@ def run_analyze(
         lambda: declared_versions(src, request.revision_requested)
     )
     return out
+
+
+# --------------------------------------------------------------------------- persist
+_COPY_CHUNK = 1024 * 1024
+
+
+def rehash_tree(request: WorkerRequest, src: Path) -> dict[str, Any]:
+    """The digest of `src` (the in-process test executor's persist, where staging == src)."""
+    require_worker_context()
+    s = settings_for(request)
+    tree = tree_digest(src, max_files=s.max_artifact_files)
+    return {"sha256": tree.sha256, "file_count": tree.file_count, "total_bytes": tree.total_bytes}
+
+
+def _persist_error(message: str, details: Any = None) -> AppError:
+    return AppError(ErrorCode.UNSAFE_CONTENT, message, 400, details)
+
+
+def run_persist(request: WorkerRequest, src: Path, out_dir: Path) -> dict[str, Any]:
+    """Copy the analyzed staging tree into the persistent workspace, within the request limits.
+
+    The source is already bounded by its tmpfs volume; these checks bound the copy again, so the
+    persistent workspace can never receive more than MAX_ARTIFACT_SIZE_MB and MAX_ARTIFACT_FILES
+    per scan. Only directories and regular files are copied; a symlink, device, FIFO or socket
+    anywhere fails the copy (the analyzed tree never contains one: extraction and fetching refuse
+    them). The top-level `.git` directory is not copied (it is excluded from the tree digest).
+    Returns the tree digest of what was written, which the runner compares with the analysis.
+    """
+    require_worker_context()
+    s = settings_for(request)
+    max_bytes = s.max_artifact_size_mb * MB
+    max_files = s.max_artifact_files
+    if any(out_dir.iterdir()):
+        raise AppError(ErrorCode.WORKSPACE_ERROR, "The persist destination is not empty", 500)
+    files = total = 0
+    src_root = src.resolve()
+    for dirpath, dirnames, filenames in os.walk(src_root, followlinks=False):
+        rel_dir = Path(dirpath).relative_to(src_root)
+        if rel_dir == Path("."):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+        dirnames.sort()
+        for name in dirnames:
+            info = os.lstat(os.path.join(dirpath, name))
+            if not stat.S_ISDIR(info.st_mode):
+                raise _persist_error("The tree contains a symlink or special file", {"path": name})
+            (out_dir / rel_dir / name).mkdir(mode=0o700)
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode):
+                raise _persist_error("The tree contains a symlink or special file", {"path": name})
+            files += 1
+            total += info.st_size
+            if files > max_files:
+                raise AppError(
+                    ErrorCode.TOO_MANY_FILES,
+                    "Artifact contains too many files",
+                    413,
+                    {"max_files": max_files},
+                )
+            if total > max_bytes:
+                raise AppError(
+                    ErrorCode.ARTIFACT_TOO_LARGE,
+                    "Artifact exceeds the size limit",
+                    413,
+                    {"max_bytes": max_bytes},
+                )
+            _copy_file(path, out_dir / rel_dir / name, info.st_size)
+    tree = tree_digest(out_dir, max_files=max_files)
+    return {"sha256": tree.sha256, "file_count": tree.file_count, "total_bytes": tree.total_bytes}
+
+
+def _copy_file(src: str, dst: Path, expected: int) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(src, flags), "rb") as fin:
+        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as fout:
+            copied = 0
+            while chunk := fin.read(_COPY_CHUNK):
+                copied += len(chunk)
+                if copied > expected:
+                    raise _persist_error("A file grew while it was copied")
+                fout.write(chunk)

@@ -184,12 +184,100 @@ def test_worker_entry_points_refuse_to_run_on_the_host(tmp_path):
     request = WorkerRequest(mode="extract", kind="software", has_upload=True, limits=limits)
     for call in (
         lambda: collect.run_extract(request, zip_path, out),
-        lambda: collect.run_analyze(request.model_copy(update={"mode": "analyze"}), out, None, out),
+        lambda: collect.run_analyze(
+            request.model_copy(update={"mode": "analyze"}), out, None, out, sbom_out=out / "s"
+        ),
+        lambda: collect.run_persist(request.model_copy(update={"mode": "persist"}), out, out),
+        lambda: collect.rehash_tree(request, out),
     ):
         with pytest.raises(AppError) as info:
             call()
         assert info.value.code == "sandbox_refused"
     assert list(out.iterdir()) == []
+
+
+def test_download_entry_points_refuse_to_run_on_the_host(tmp_path):
+    """Audit finding H1: git clone and Hugging Face downloads never run in the runner or API."""
+    from app.fetch_worker.protocol import FetchLimits, FetchRequest
+    from app.fetch_worker.run import run_fetch
+    from app.scanners.git_fetch import CloneLimits, clone_repository
+    from app.scanners.hf.base import HfFetchLimits
+    from app.scanners.hf.client import HuggingFaceProvider
+    from app.security.url_validation import HfRepo
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    repo = HfRepo("model", "acme/tiny")
+    hf_limits = HfFetchLimits(1024, 1024, 10, 10)
+    provider = HuggingFaceProvider(
+        timeout_seconds=1, max_retries=0, max_api_bytes=1024, user_agent="t"
+    )
+    request = FetchRequest(
+        source="github",
+        url="https://github.com/acme/widget",
+        allowed_hosts=["github.com"],
+        user_agent="t",
+        limits=FetchLimits(
+            max_total_bytes=1,
+            max_files=1,
+            max_file_bytes=1,
+            timeout_seconds=1,
+            hf_api_timeout_seconds=1,
+            http_max_retries=0,
+            max_api_bytes=1,
+        ),
+    )
+    for call in (
+        lambda: clone_repository("https://github.com/a/b.git", dest, None, CloneLimits(1, 1)),
+        lambda: provider.fetch(repo, None, dest, hf_limits),
+        lambda: MockHfProvider().fetch(repo, None, dest, hf_limits),
+        lambda: run_fetch(request, dest),
+    ):
+        with pytest.raises(AppError) as info:
+            call()
+        assert info.value.code == "sandbox_refused"
+    assert list(dest.iterdir()) == []
+
+
+def test_inprocess_fetcher_cannot_be_built_outside_tests(monkeypatch):
+    from app.fetch.inprocess import InProcessTestFetcher
+
+    with pytest.raises(AppError):
+        InProcessTestFetcher(Settings(_env_file=None))  # APP_ENV=development
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    with pytest.raises(AppError):
+        InProcessTestFetcher(Settings(_env_file=None, app_env="test"))
+
+
+_DOWNLOAD_FUNCTIONS = ("clone_repository", "run_fetch", "HuggingFaceProvider", "MockHfProvider")
+# Only these modules may reach the download code: the fetcher worker, and the pytest-only
+# in-process fetcher.
+_DOWNLOAD_ALLOWED = {"fetch/inprocess.py"}
+
+
+def test_runner_and_pipeline_never_download():
+    for directory in ("api", "pipeline", "runner", "analysis", "fetch", "blockchain", "risk"):
+        for path in sorted((APP / directory).glob("*.py")):
+            rel = f"{directory}/{path.name}"
+            if rel in _DOWNLOAD_ALLOWED:
+                continue
+            called = _calls(path) & set(_DOWNLOAD_FUNCTIONS)
+            assert not called, f"{rel} calls {called}: downloads belong to the fetcher"
+            for module, _ in _imports(ast.parse(path.read_text()), top_level_only=False):
+                assert module not in (
+                    "app.scanners.git_fetch",
+                    "app.scanners.hf.client",
+                    "app.scanners.hf.mock",
+                    "app.fetch_worker.run",
+                ), f"{rel} imports {module}"
+
+
+def test_runner_image_has_no_git():
+    dockerfile = (APP.parent / "Dockerfile").read_text()
+    assert "install" in dockerfile
+    for line in dockerfile.splitlines():
+        if "apt-get install" in line:
+            assert " git " not in f" {line} ", "the API/runner images must not ship git"
 
 
 def test_inprocess_analyzer_cannot_be_built_outside_tests(monkeypatch):
@@ -263,7 +351,8 @@ def test_successful_scan_records_its_sandbox_runs(scan_client, test_settings):
     body = _post(scan_client, SOFTWARE)
     assert body["status"] == "completed", body["error"]
     runs = body["sandbox"]["runs"]
-    assert [r["mode"] for r in runs] == ["extract", "analyze"]
+    # The in-process executor has no staging volume or holder; persist re-hashes the tree.
+    assert [r["mode"] for r in runs] == ["extract", "analyze", "persist"]
     assert all(r["status"] == "ok" and r["provider"] == "inprocess_test" for r in runs)
     # The test executor isolates nothing, and says so.
     assert all(r["runtime_verified"] is False for r in runs)

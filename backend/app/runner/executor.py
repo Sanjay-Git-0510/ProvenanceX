@@ -1,8 +1,9 @@
 """Runs one claimed scan through the pipeline for its artifact type. Never raises.
 
-While the scan runs, a heartbeat thread renews the claim (app/pipeline/ownership.py). The
-pipeline's session is fenced on the claim token, so if stale recovery replaces the claim the
-run stops writing at its next commit.
+While the scan runs, a heartbeat thread renews the claim (app/pipeline/ownership.py) and a
+watchdog thread (app/runner/watchdog.py) checks that the current sandbox step and the scan as a
+whole are still within their deadlines. The pipeline's session is fenced on the claim token, so
+if stale recovery or the watchdog replaces the claim, the run stops writing at its next commit.
 """
 
 import logging
@@ -17,6 +18,7 @@ from app.pipeline.ownership import Heartbeat, ScanClaim, default_runner_id
 from app.pipeline.providers import ScanProviders
 from app.pipeline.software import run_software_ingestion
 from app.runner.queue import claim_scan
+from app.runner.watchdog import Watchdog
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,10 @@ def run_claimed_scan(
     if claim is None:
         runner(scan_id, session_factory, settings, providers)
         return
-    with Heartbeat(session_factory, claim, settings.runner_heartbeat_seconds):
+    with (
+        Heartbeat(session_factory, claim, settings.runner_heartbeat_seconds),
+        Watchdog(session_factory, claim, settings),
+    ):
         runner(scan_id, session_factory, settings, providers, claim)
 
 

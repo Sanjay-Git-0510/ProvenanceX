@@ -23,6 +23,7 @@ import contextvars
 import logging
 import socket
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -48,6 +49,40 @@ class ClaimLost(Exception):  # noqa: N818 - a state, not an error condition of t
         self.scan_id = scan_id
 
 
+class StepClock:
+    """The deadline of the sandbox step (fetch, extract, analyze, persist) now in progress.
+
+    Container runs set it; the runner watchdog (app/runner/watchdog.py) reads it from another
+    thread, so a step that hangs past its own deadline is detected even while the heartbeat
+    thread keeps renewing the claim.
+    """
+
+    def __init__(self, clock=time.monotonic) -> None:  # noqa: ANN001
+        self._lock = threading.Lock()
+        self._clock = clock
+        self._name: str | None = None
+        self._deadline: float | None = None
+
+    def begin(self, name: str, budget_seconds: float) -> None:
+        with self._lock:
+            self._name = name
+            self._deadline = self._clock() + budget_seconds
+
+    def end(self) -> None:
+        with self._lock:
+            self._name = None
+            self._deadline = None
+
+    def overdue(self, grace_seconds: float) -> str | None:
+        """The name of the current step if it is past its deadline plus grace, else None."""
+        with self._lock:
+            if self._deadline is None:
+                return None
+            if self._clock() > self._deadline + grace_seconds:
+                return self._name
+            return None
+
+
 @dataclass
 class ScanClaim:
     """One runner's ownership of one scan. `lost` is set once the claim is known to be gone."""
@@ -56,6 +91,7 @@ class ScanClaim:
     token: UUID
     runner_id: str = ""
     lost: threading.Event = field(default_factory=threading.Event, compare=False, repr=False)
+    steps: StepClock = field(default_factory=StepClock, compare=False, repr=False)
 
     def mark_lost(self) -> None:
         if not self.lost.is_set():
@@ -192,6 +228,10 @@ class Heartbeat:
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval):
+            if self.claim.lost.is_set():
+                # Lost or given up by the watchdog: stop renewing, so the claim goes stale and
+                # other runners can recover the scan even if this process is wedged.
+                return
             try:
                 with self.session_factory() as session:
                     if not renew(session, self.claim):

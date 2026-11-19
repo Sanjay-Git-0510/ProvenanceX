@@ -146,6 +146,7 @@ class FakeHf:
 @dataclass
 class Clone:
     commit_sha: str
+    revision: str | None = None
 
 
 def _settings(tmp_path) -> Settings:
@@ -156,6 +157,7 @@ def _settings(tmp_path) -> Settings:
         model_path=tmp_path / "no-models",
         app_env="test",
         analyzer_provider="inprocess_test",
+        fetcher_provider="inprocess_test",
     )
 
 
@@ -178,14 +180,14 @@ def _family(kind, source):
 def _live_scan(family, variant_index, state, settings, session_factory, monkeypatch):
     """Run one artifact state through the real pipeline and return the stored decision."""
 
-    def fake_clone(_url, dest, _revision, _limits):
+    def fake_clone(_url, dest, _revision, _limits, **_kwargs):
         for rel, content in state.files.items():
             path = dest / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
         return Clone(state.commit)
 
-    monkeypatch.setattr("app.pipeline.software.clone_repository", fake_clone)
+    monkeypatch.setattr("app.fetch.inprocess.clone_repository", fake_clone)
     rng = np.random.default_rng([SEED, family.index, variant_index, RECIPE_STREAM + 1])
     providers = ScanProviders(
         sbom=FakeSbom(_cyclonedx(state, family)),

@@ -17,6 +17,9 @@ from app.scanners.hf.client import (
 )
 from app.security.url_validation import HfRepo
 
+# Download code runs only in the fetcher container or this pytest-only context.
+pytestmark = pytest.mark.usefixtures("fetch_test_context")
+
 SHA = "a" * 40
 REPO = HfRepo("model", "org/repo")
 LIMITS = HfFetchLimits(max_total_bytes=1000, max_file_bytes=100, max_files=20, timeout_seconds=60)

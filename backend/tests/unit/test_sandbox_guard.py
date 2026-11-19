@@ -48,6 +48,8 @@ def test_host_is_not_reported_as_isolated():
         "rootfs_read_only",
         "network_isolated",
         "no_docker_socket",
+        "seccomp_filtered",
+        "no_secret_env",
     }
     assert not is_isolated(report)
     assert not is_isolated({})

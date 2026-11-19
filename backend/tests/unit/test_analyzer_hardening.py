@@ -19,15 +19,27 @@ SCAN = uuid.UUID("12345678-1234-1234-1234-123456789abc")
 LIMITS = AnalyzerLimits(timeout_seconds=60, memory_mb=1024, cpus=1.0, pids=64, tmp_mb=128)
 
 
+STAGING = f"px-stg-{SCAN}"
+
+
+def _staging(target: str, read_only: bool) -> MountSpec:
+    return MountSpec("volume", STAGING, target, "staging", read_only, SCAN)
+
+
 def _spec(mode="analyze", mounts=None, uid=1000) -> AnalyzerSpec:
     base = f"/ws/{SCAN}"
     if mounts is None:
-        if mode == "analyze":
-            mounts = (MountSpec("bind", f"{base}/src", "/artifact", "src", True, SCAN),)
+        if mode in ("analyze", "hold"):
+            mounts = (_staging("/artifact", True),)
+        elif mode == "persist":
+            mounts = (
+                _staging("/artifact", True),
+                MountSpec("bind", f"{base}/src", "/out/src", "src", False, SCAN),
+            )
         else:
             mounts = (
                 MountSpec("bind", f"{base}/input", "/input", "input", True, SCAN),
-                MountSpec("bind", f"{base}/src", "/out/src", "src", False, SCAN),
+                _staging("/out/src", False),
             )
     return AnalyzerSpec(SCAN, mode, "provenancex-analyzer:0.1.0", uid, uid, mounts, LIMITS)
 
@@ -38,7 +50,7 @@ def _refused(argv):
     assert info.value.code == "sandbox_refused"
 
 
-@pytest.mark.parametrize("mode", ["analyze", "extract"])
+@pytest.mark.parametrize("mode", ["analyze", "extract", "persist", "hold"])
 def test_built_command_passes(mode):
     argv = build_create_argv("docker", _spec(mode))
     assert assert_create_hardened(argv) == mode
@@ -46,8 +58,54 @@ def test_built_command_passes(mode):
 
 
 def test_volume_mounts_pass():
-    m = (MountSpec("volume", "px_ws", "/artifact", "src", True, SCAN),)
-    assert_create_hardened(build_create_argv("docker", _spec(mounts=m)))
+    m = (
+        _staging("/artifact", True),
+        MountSpec("volume", "px_ws", "/out/src", "src", False, SCAN),
+    )
+    assert_create_hardened(build_create_argv("docker", _spec("persist", mounts=m)))
+
+
+@pytest.mark.parametrize(
+    ("mode", "mounts"),
+    [
+        # analyze must not read the persistent workspace instead of the staging volume
+        ("analyze", (MountSpec("bind", f"/ws/{SCAN}/src", "/artifact", "src", True, SCAN),)),
+        # extract must not write anywhere but the staging volume (audit finding L1)
+        (
+            "extract",
+            (
+                MountSpec("bind", f"/ws/{SCAN}/input", "/input", "input", True, SCAN),
+                MountSpec("bind", f"/ws/{SCAN}/src", "/out/src", "src", False, SCAN),
+            ),
+        ),
+        # the staging volume of another scan
+        (
+            "analyze",
+            (
+                MountSpec(
+                    "volume",
+                    "px-stg-87654321-1234-1234-1234-123456789abc",
+                    "/artifact",
+                    "staging",
+                    True,
+                    SCAN,
+                ),
+            ),
+        ),
+        # a writable staging mount for analyze
+        ("analyze", (MountSpec("volume", STAGING, "/artifact", "staging", False, SCAN),)),
+        # the holder may not write
+        ("hold", (MountSpec("volume", STAGING, "/artifact", "staging", False, SCAN),)),
+    ],
+)
+def test_wrong_mounts_are_refused(mode, mounts):
+    _refused(build_create_argv("docker", _spec(mode, mounts=mounts)))
+
+
+def test_staging_mount_requires_volume_nocopy():
+    argv = build_create_argv("docker", _spec())
+    argv = [a.replace(",volume-nocopy", "") for a in argv]
+    _refused(argv)
 
 
 def test_root_is_refused():

@@ -45,7 +45,7 @@ LIMITS = AnalyzerLimits(timeout_seconds=60, memory_mb=1024, cpus=1.5, pids=64, t
 
 
 def _spec(claim="none", instance="px_ws") -> AnalyzerSpec:
-    mounts = (MountSpec("bind", f"/ws/{SCAN}/src", "/artifact", "src", True, SCAN),)
+    mounts = (MountSpec("volume", f"px-stg-{SCAN}", "/artifact", "staging", True, SCAN),)
     return AnalyzerSpec(
         SCAN, "analyze", "img:1", 1000, 1000, mounts, LIMITS, instance=instance, claim_token=claim
     )
@@ -249,15 +249,23 @@ def test_decide(scan, state, expected):
 
 
 class FakeDockerCli:
-    """Answers `docker ps` with fixed lines and records `docker rm` calls."""
+    """Answers `docker ps` / `docker volume ls` with fixed lines; records removals."""
 
-    def __init__(self, lines: list[str], ps_exit: int = 0):
+    def __init__(self, lines: list[str], ps_exit: int = 0, volumes: list[str] | None = None):
         self.lines = lines
         self.ps_exit = ps_exit
+        self.volumes = volumes or []
         self.removed: list[str] = []
+        self.removed_volumes: list[str] = []
         self.gone: set[str] = set()
 
     def __call__(self, args):
+        if args[:2] == ["volume", "ls"]:
+            visible = [v for v in self.volumes if v.split("\t")[0] not in self.removed_volumes]
+            return 0, "\n".join(visible).encode()
+        if args[:3] == ["volume", "rm", "--force"]:
+            self.removed_volumes.append(args[3])
+            return 0, b""
         if args[0] == "ps":
             visible = [ln for ln in self.lines if ln.split("\t")[0] not in self.gone]
             return self.ps_exit, "\n".join(visible).encode()

@@ -1,10 +1,12 @@
-"""Finds and removes orphaned analyzer containers (audit finding M1).
+"""Finds and removes orphaned sandbox containers, staging volumes and workspaces (audit finding
+M1, extended in Milestone B to fetcher containers and tmpfs staging volumes).
 
 An analyzer container is normally removed by the `finally` in DockerAnalyzer.run. If the runner
 is killed (SIGKILL, OOM, host restart) that never runs. The container then stops by itself at
 its in-container deadline, and this module removes what is left.
 
-Which containers are considered: only those labelled `io.provenancex.role=analyzer` AND
+Which containers are considered: only those labelled `io.provenancex.role=analyzer` or
+`io.provenancex.role=fetcher` AND
 `io.provenancex.instance=<this deployment's ANALYZER_INSTANCE>`. Containers of another Compose
 project, unlabelled containers and anything else on the daemon are never listed, so never
 removed.
@@ -15,6 +17,12 @@ of this instance is an orphan: its scan finished, failed, was recovered by anoth
 its claim was replaced. A container whose scan is not in the database at all is removed only
 once it has stopped.
 
+Staging volumes (`io.provenancex.role=staging`, same instance label) follow the same rule, and are
+removed after the containers, because Docker refuses to remove a volume that is still mounted
+(that refusal is harmless: the next pass retries). Workspace directories with no scan row at all
+are removed once they are older than an hour (the API creates a workspace a moment before its
+scan row, so a fresh one is never touched).
+
 Safety under concurrency: the decision is made from the database after listing, containers
 are removed by their full id (never by name, which a new run may reuse), and `docker rm -f` on
 a container that is already gone is harmless, so several runners can reconcile at once and a
@@ -24,9 +32,11 @@ pass can be repeated any number of times.
 import logging
 import os
 import subprocess
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
@@ -40,8 +50,14 @@ from app.analysis.hardening import (
     LABEL_SCAN,
     ROLE_ANALYZER,
 )
+from app.analysis.staging import DockerStaging
 from app.core.config import Settings
 from app.db.models import Scan, ScanStatus, utcnow
+from app.pipeline.workspace import discard_workspace
+
+ROLE_FETCHER = "fetcher"
+SANDBOX_ROLES = (ROLE_ANALYZER, ROLE_FETCHER)
+ORPHAN_WORKSPACE_AGE_SECONDS = 3600
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +95,9 @@ class ReconcileReport:
     removed: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     error: str | None = None
+    volumes_removed: list[str] = field(default_factory=list)
+    volumes_kept: list[str] = field(default_factory=list)
+    workspaces_removed: list[str] = field(default_factory=list)
 
 
 def _aware(moment: datetime | None) -> datetime | None:
@@ -134,16 +153,27 @@ class OrphanReconciler:
         self.instance = settings.analyzer_instance_label
         self.stale_seconds = settings.runner_stale_seconds
         self.docker = docker or _default_runner(settings.analyzer_docker_path)
+        self.staging = DockerStaging(settings, docker=self.docker)
+        self.workspace_root = settings.workspace_root
 
     def list_containers(self) -> list[AnalyzerContainer] | None:
-        """This instance's analyzer containers, or None if Docker could not be asked."""
+        """This instance's analyzer and fetcher containers, or None if Docker failed."""
+        found: list[AnalyzerContainer] = []
+        for wanted_role in SANDBOX_ROLES:
+            listed = self._list_role(wanted_role)
+            if listed is None:
+                return None
+            found.extend(listed)
+        return found
+
+    def _list_role(self, wanted_role: str) -> list[AnalyzerContainer] | None:
         code, raw = self.docker(
             [
                 "ps",
                 "--all",
                 "--no-trunc",
                 "--filter",
-                f"label={LABEL_ROLE}={ROLE_ANALYZER}",
+                f"label={LABEL_ROLE}={wanted_role}",
                 "--filter",
                 f"label={LABEL_INSTANCE}={self.instance}",
                 "--format",
@@ -159,7 +189,7 @@ class OrphanReconciler:
                 continue
             cid, name, state, role, instance, scan, claim = parts
             # Defense in depth: never trust the filter alone.
-            if role != ROLE_ANALYZER or instance != self.instance or not cid:
+            if role != wanted_role or instance != self.instance or not cid:
                 continue
             try:
                 scan_id: UUID | None = UUID(scan)
@@ -216,4 +246,59 @@ class OrphanReconciler:
             else:
                 # Already gone (another runner removed it) or the daemon refused; next pass.
                 report.failed.append(container.container_id)
+        self._reconcile_volumes(session, report)
+        self._reconcile_workspaces(session, report)
         return report
+
+    def _reconcile_volumes(self, session: Session, report: ReconcileReport) -> None:
+        volumes = self.staging.list_volumes()
+        if volumes is None:
+            return
+        ids = []
+        for v in volumes:
+            try:
+                ids.append(UUID(v["scan"]))
+            except ValueError:
+                continue
+        scans = self._ownership(session, ids)
+        now = utcnow()
+        for v in volumes:
+            try:
+                scan_id = UUID(v["scan"])
+            except ValueError:
+                report.volumes_kept.append(v["name"])
+                continue
+            # A volume has no running state: decide as for a stopped container.
+            probe = AnalyzerContainer(
+                v["name"], v["name"], "volume", self.instance, scan_id, v["claim"]
+            )
+            if decide(probe, scans.get(scan_id), now, self.stale_seconds) == "keep":
+                report.volumes_kept.append(v["name"])
+            elif self.staging.remove(v["name"]):
+                report.volumes_removed.append(v["name"])
+                logger.warning("Removed orphaned staging volume %s", v["name"])
+
+    def _reconcile_workspaces(self, session: Session, report: ReconcileReport) -> None:
+        base = Path(self.workspace_root)
+        if not base.is_dir():
+            return
+        candidates: dict[UUID, Path] = {}
+        cutoff = time.time() - ORPHAN_WORKSPACE_AGE_SECONDS
+        for entry in base.iterdir():
+            try:
+                scan_id = UUID(entry.name)
+            except ValueError:
+                continue
+            if str(scan_id) != entry.name or entry.is_symlink() or not entry.is_dir():
+                continue
+            if entry.stat().st_mtime < cutoff:
+                candidates[scan_id] = entry
+        if not candidates:
+            return
+        known = set(self._ownership(session, candidates))
+        for scan_id, path in candidates.items():
+            if scan_id in known:
+                continue
+            discard_workspace(base, scan_id)
+            report.workspaces_removed.append(str(scan_id))
+            logger.warning("Removed orphaned workspace %s (no scan row)", path.name)

@@ -23,18 +23,25 @@ import sys
 import textwrap
 import time
 import uuid
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
+from app.analysis.base import AnalysisJob
+from app.analysis.docker_analyzer import DockerAnalyzer
 from app.analysis.reconcile import OrphanReconciler
+from app.analysis.staging import DockerStaging
 from app.core.config import Settings
 from app.db.models import Artifact, ArtifactSource, ArtifactType, Scan, ScanStatus, utcnow
+from app.pipeline.ownership import claim_context
 from app.pipeline.workspace import create_workspace
 from app.runner.main import reconcile_once
 from app.runner.queue import claim_scan
 from app.sandbox_worker.protocol import EXIT_DEADLINE
+from tests.conftest import build_zip
+from tests.live_helpers import volume_exists
 
 pytestmark = pytest.mark.sandbox
 IMAGE = "provenancex-analyzer:0.1.0"
@@ -57,14 +64,17 @@ BUSY_RUNNER = textwrap.dedent(
     from app.pipeline.ownership import ScanClaim, claim_context
     from app.pipeline.workspace import Workspace
 
-    scan_id, token, root, instance = sys.argv[1:5]
+    scan_id, token, root, instance, staging = sys.argv[1:6]
     settings = Settings(
         _env_file=None, workspace_root=Path(root), analyzer_image="%(image)s",
         analyzer_timeout_seconds=%(deadline)d, analyzer_extract_timeout_seconds=%(deadline)d,
         analyzer_host_grace_seconds=60, analyzer_cpus=%(cpus)s, analyzer_instance=instance,
         sbom_provider="syft",
     )
-    job = AnalysisJob(uuid.UUID(scan_id), Workspace(Path(root) / scan_id), "software", False)
+    job = AnalysisJob(
+        uuid.UUID(scan_id), Workspace(Path(root) / scan_id), "software", False,
+        staging_volume=staging,
+    )
     print("STARTING", flush=True)
     with claim_context(ScanClaim(uuid.UUID(scan_id), uuid.UUID(token))):
         DockerAnalyzer(settings).run(job, "analyze")
@@ -136,12 +146,22 @@ def test_killed_runner_leaves_no_analyzer_behind(tmp_path, session_factory, byst
         s.commit()
         claim = claim_scan(s, scan.id, RUNNER_ID)
     workspace = create_workspace(settings.workspace_root, claim.scan_id)
-    (workspace.src_dir / "app.py").write_text("print('benign fixture')\n")
+    workspace.upload_path.write_bytes(build_zip([("app.py", "print('benign fixture')\n")]))
+    # The scan's kernel-capped staging volume, its holder, and the extracted fixture in it.
+    analyzer = DockerAnalyzer(settings)
+    job = AnalysisJob(claim.scan_id, workspace, "software", True)
+    uid, gid = analyzer.workspace_owner(job)
+    volume = DockerStaging(settings).create(claim.scan_id, str(claim.token), uid, gid)
+    job = replace(job, staging_volume=volume.name)
+    with claim_context(claim):
+        analyzer.start_holder(job)
+        assert analyzer.run(job, "extract").result.status == "ok"
+    holder = f"px-ana-{claim.scan_id}-hold"
     name = f"px-ana-{claim.scan_id}-analyze"
 
     runner = subprocess.Popen(  # noqa: S603 - benign helper script
         [sys.executable, "-c", BUSY_RUNNER, str(claim.scan_id), str(claim.token),
-         str(settings.workspace_root), instance],
+         str(settings.workspace_root), instance, volume.name],
         cwd=BACKEND, stdout=subprocess.PIPE, text=True, start_new_session=True,
     )  # fmt: skip
     try:
@@ -177,7 +197,11 @@ def test_killed_runner_leaves_no_analyzer_behind(tmp_path, session_factory, byst
         )
         assert recovered == [claim.scan_id]
         assert _state(name) is None, "orphaned analyzer container was not removed"
-        assert len(report.removed) == 1
+        assert _state(holder) is None, "orphaned staging holder was not removed"
+        assert len(report.removed) == 2
+        # Milestone B: the staging volume goes with them (after its holder), and its tmpfs.
+        assert report.volumes_removed == [volume.name]
+        assert not volume_exists(volume.name)
         assert not workspace.root.exists()
         with session_factory() as s:
             row = s.get(Scan, claim.scan_id)
@@ -196,4 +220,5 @@ def test_killed_runner_leaves_no_analyzer_behind(tmp_path, session_factory, byst
     finally:
         if runner.poll() is None:
             os.killpg(runner.pid, signal.SIGKILL)
-        _docker("rm", "--force", name)
+        _docker("rm", "--force", name, holder)
+        _docker("volume", "rm", "--force", volume.name)

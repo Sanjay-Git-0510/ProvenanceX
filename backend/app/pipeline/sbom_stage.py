@@ -2,6 +2,10 @@
 
 The raw SBOM is kept off-chain at <workspace>/sbom.cdx.json. Its SHA-256 is stored as
 Scan.bom_sha256, which Phase 7 anchors as `bom_hash`.
+
+The SBOM is untrusted (Syft ran on attacker-controlled content), so it is parsed in a
+memory-limited child process (app/scanners/sbom/parse_child.py, audit finding M3), never by
+`json.loads` in the runner itself.
 """
 
 import hashlib
@@ -15,17 +19,20 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.errors import AppError, ErrorCode
 from app.db.models import Component, Scan
 from app.pipeline.stages import StageStatus, execute_stage
 from app.pipeline.workspace import MB, Workspace
 from app.scanners.manifests import ProjectPackage, normalize_package_name
 from app.scanners.sbom.base import SbomProvider
-from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom, parse_cyclonedx
+from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom
+from app.scanners.sbom.parse_child import parse_sbom_isolated
 
 logger = logging.getLogger(__name__)
 
 STAGE = "sbom"
 SBOM_FILENAME = "sbom.cdx.json"
+_PARSING_FILENAME = ".sbom-parsing.cdx.json"
 
 
 @dataclass
@@ -72,12 +79,28 @@ def run_sbom_stage(
 ) -> SbomStageOutput | None:
     def body(scan: Scan) -> tuple[SbomStageOutput, StageStatus, dict[str, Any]]:
         result = provider.generate(workspace.src_dir, workspace.root)
-        parsed = parse_cyclonedx(
-            result.raw,
-            max_bytes=settings.max_sbom_mb * MB,
-            max_components=settings.max_sbom_components,
-        )
-        _write_private(workspace.root / SBOM_FILENAME, result.raw)
+        max_bytes = settings.max_sbom_mb * MB
+        if len(result.raw) > max_bytes:
+            raise AppError(
+                ErrorCode.SBOM_TOO_LARGE,
+                "SBOM exceeds the size limit",
+                413,
+                {"size_bytes": len(result.raw), "max_bytes": max_bytes},
+            )
+        parsing = workspace.root / _PARSING_FILENAME
+        _write_private(parsing, result.raw)
+        try:
+            parsed = parse_sbom_isolated(
+                parsing,
+                max_bytes=max_bytes,
+                max_components=settings.max_sbom_components,
+                memory_mb=settings.sbom_parse_memory_mb,
+                timeout_seconds=settings.sbom_parse_timeout_seconds,
+            )
+        except BaseException:
+            parsing.unlink(missing_ok=True)
+            raise
+        os.replace(parsing, workspace.root / SBOM_FILENAME)
         bom_sha256 = hashlib.sha256(result.raw).hexdigest()
         scan.bom_sha256 = bom_sha256
 

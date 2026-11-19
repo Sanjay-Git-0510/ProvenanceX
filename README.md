@@ -36,7 +36,7 @@ The development machine is Windows with WSL2 Ubuntu. Keep the repo on the Linux 
 
 ```bash
 cp .env.example .env          # then edit POSTGRES_PASSWORD and DATABASE_URL
-make up                       # builds the analyzer sandbox image, detects the Docker socket group,
+make up                       # builds the analyzer and fetcher sandbox images, detects the socket group,
                               # then: docker compose up --build -d
 curl http://localhost:8000/api/v1/health/ready
 # {"status":"ready","db":"ok","version":"0.1.0"}
@@ -95,7 +95,8 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --reload      # needs DATABASE_URL pointing at a running Postgres
 # Scans need the scan runner and the analyzer image (Docker): in a second shell
-make analyzer-image && make runner           # runs app.runner with ANALYZER_WORKSPACE_MOUNT=bind
+make sandbox-images && make runner           # runs app.runner with ANALYZER_WORKSPACE_MOUNT=bind
+# (GitHub/HF scans also need the proxy and fetch network: docker compose up -d egress-proxy)
 
 # Frontend
 cd frontend
@@ -294,7 +295,8 @@ Limitations:
   kernel, and the sandbox runs as the workspace owner's uid (never 0). If that user is in the `docker`
   or `sudo` groups, an escape can lead to root in WSL and to Windows files.
 - **The scan runner has Docker access, which is root-equivalent.** It no longer parses artifact
-  content (that runs in the analyzer container), but it still performs downloads until Milestone B. See
+  content (that runs in the analyzer container) or downloads anything (that runs in the fetcher container
+  behind the egress proxy, [docs/security/fetcher.md](docs/security/fetcher.md)). See
   [docs/security/sandbox.md](docs/security/sandbox.md) and [docs/architecture.md](docs/architecture.md).
 
 ## Local chain
@@ -411,8 +413,9 @@ A pass is not a statement that an artifact is safe: read the not-evaluated layer
 - The `hash_consistency_failed` BLOCK needs a source URL, so it cannot fire through an upload. It has unit tests only.
 - The demo's frontend image runs the Vite dev server. There is no production frontend image.
 - The optional behavioral sandbox needs the scan runner on the host (bind mounts). Do not run real malware through it.
-- Downloads (git clone, Hugging Face fetch) and `POST /verify`'s re-hash still run outside the analyzer sandbox; see
-  "Not yet sandboxed" in [docs/security/sandbox.md](docs/security/sandbox.md).
+- `POST /verify`'s re-hash still runs outside the analyzer sandbox; see "Not yet sandboxed" in
+  [docs/security/sandbox.md](docs/security/sandbox.md). Downloads are isolated since Milestone B
+  ([docs/security/fetcher.md](docs/security/fetcher.md)).
 - The local chain runs in memory, so a restart erases its anchors.
 - 5 frontend npm advisories are open and unfixed: see [docs/security/npm-audit-triage.md](docs/security/npm-audit-triage.md).
   The `contracts/` tooling has separate, untriaged advisories.

@@ -1,0 +1,15 @@
+# Exact versions for the fetcher image (docker/fetcher/Dockerfile), installed with --no-deps so
+# nothing unpinned is pulled in. Only what app.fetch_worker imports: pydantic (the request and
+# result schema) and httpx (the Hugging Face client, through the egress proxy). No database,
+# chain, Docker or ML packages. git comes from the Debian base image.
+pydantic==2.14.3
+pydantic_core==2.50.4
+annotated-types==0.8.0
+typing_extensions==4.16.0
+typing-inspection==0.4.5
+httpx==0.28.1
+httpcore==1.0.9
+h11==0.16.0
+anyio==4.16.0
+idna==3.20
+certifi==2026.10.23

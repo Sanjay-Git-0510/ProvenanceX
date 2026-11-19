@@ -126,6 +126,7 @@ def test_settings(tmp_path) -> Settings:
         # pytest + APP_ENV=test) and the API runs scans inline instead of via the scan-runner.
         app_env="test",
         analyzer_provider="inprocess_test",
+        fetcher_provider="inprocess_test",
         scan_dispatch="inline_test",
     )
 
@@ -159,9 +160,25 @@ def attach_test_analyzer(providers, settings):
     analyzer, because SBOM generation runs inside it.
     """
     from app.analysis.inprocess import InProcessTestAnalyzer
+    from app.fetch.inprocess import InProcessTestFetcher
 
     providers.analyzer = InProcessTestAnalyzer(settings, sbom_provider=providers.sbom)
+    # Downloads run in the fetcher (never in the runner); in tests, the pytest-only in-process
+    # fetcher, fed with the hand-built HF provider.
+    if providers.fetcher is None:
+        providers.fetcher = InProcessTestFetcher(
+            settings, hf_provider=providers.hf, hf_from_settings=False
+        )
     return providers
+
+
+@pytest.fixture
+def fetch_test_context():
+    """Allow download code (git clone, HF fetch) in this test, as the in-process fetcher does."""
+    from app.security.sandbox_guard import inprocess_test_context
+
+    with inprocess_test_context():
+        yield
 
 
 # --------------------------------------------------------------------------- ZIP helpers

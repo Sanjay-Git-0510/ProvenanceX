@@ -55,12 +55,15 @@ def test_request_on_stdin_carries_no_secrets(tmp_path, fake, monkeypatch):
     assert "database_url" not in request["limits"]
 
 
-def test_analyze_mounts_src_read_only(tmp_path, fake):
+def test_analyze_mounts_the_staging_volume_read_only(tmp_path, fake):
     fake.configure(start="ok", output_file=str(worker_output(tmp_path / "out", "analyze")))
     run, job = _run(tmp_path, fake, "analyze")
     create = next(c for c in fake.calls() if c[0] == "create")
     mounts = [a for a in create if a.startswith("--mount=")]
-    assert any(m.endswith("dst=/artifact,readonly") for m in mounts)
+    assert (
+        f"--mount=type=volume,src=px-stg-{job.scan_id},dst=/artifact,volume-nocopy,readonly"
+        in mounts
+    )
     assert not any("/out/src" in m for m in mounts)
     assert run.result.analysis.tree.file_count == 1
 
@@ -70,8 +73,11 @@ def test_volume_mode_uses_named_volume_subpaths(tmp_path, fake):
     _run(tmp_path, fake, analyzer_workspace_mount="volume", analyzer_workspace_volume="px_ws")
     create = next(c for c in fake.calls() if c[0] == "create")
     mounts = [a for a in create if a.startswith("--mount=")]
-    assert all(m.startswith("--mount=type=volume,src=px_ws,") for m in mounts)
-    assert any("volume-subpath=" in m and m.endswith("/src") for m in mounts)
+    workspace = [m for m in mounts if "src=px-stg-" not in m]
+    assert workspace and all(m.startswith("--mount=type=volume,src=px_ws,") for m in workspace)
+    assert any("volume-subpath=" in m and "/input" in m for m in workspace)
+    # extract writes only into the kernel-capped staging volume, never the workspace.
+    assert any("src=px-stg-" in m and "dst=/out/src" in m for m in mounts)
 
 
 def test_missing_docker_is_unavailable(tmp_path, fake):

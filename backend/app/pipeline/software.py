@@ -2,8 +2,9 @@
 
 Implements CLAUDE.md pipeline steps for software artifacts:
   1. receive input / scan_id   (the API creates the Scan row and workspace)
-  2. safe working directory    (ZIP extraction in the analyzer sandbox, or hardened git fetch
-                                into workspace/src)
+  2. safe working directory    (a kernel-capped tmpfs staging volume per scan; ZIP extraction
+                                in the analyzer sandbox, or a hardened git fetch in the isolated
+                                fetcher container behind the egress proxy)
   3. SHA-256                   (provenancex-tree-v1 content digest, computed in the analyzer;
                                 raw ZIP hash for uploads)
   4. SBOM                      (Syft -> CycloneDX -> Component rows)        [sbom_stage]
@@ -15,10 +16,11 @@ Implements CLAUDE.md pipeline steps for software artifacts:
  11-18. risk                  (features, models, fusion, policy, SHAP, RiskDecision) [risk_stage]
 Later phases add their steps after these.
 
-Sandbox-only processing: every step that reads artifact content (extraction, tree digest,
-manifest detection, Syft, static analysis, config digest, declared versions) runs in the
-analyzer container (app/pipeline/sandboxed.py). The stages here only store its validated
-output. Without a working analyzer the scan fails with sandbox_unavailable.
+Sandbox-only processing: the download runs in the fetcher container and every step that reads
+artifact content (extraction, tree digest, manifest detection, Syft, static analysis, config
+digest, declared versions) runs in the analyzer container (app/pipeline/sandboxed.py). The
+runner never clones, downloads or parses the artifact; the stages here only store validated
+output. Without a working fetcher or analyzer the scan fails; there is no host fallback.
 
 `run_software_ingestion` never raises (see app/pipeline/lifecycle.py). An ingestion
 failure (steps 1-3) marks the Scan FAILED with a structured error and removes the
@@ -27,34 +29,47 @@ stage in Scan.stages (unavailable/error/skipped), so partial evidence is never s
 complete.
 """
 
+import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.analysis.base import AnalysisJob, ContentAnalyzer, section_to_error
+from app.analysis.base import SBOM_INCOMING, AnalysisJob, ContentAnalyzer, section_to_error
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.core.hashing import TREE_DIGEST_VERSION, TreeDigest, sha256_file
 from app.db.models import ArtifactSource, Scan, utcnow
+from app.fetch.base import FetchJob
 from app.pipeline.anchor_stage import run_anchor_stage
 from app.pipeline.graph_stage import run_graph_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.ownership import ScanClaim
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
-from app.pipeline.providers import ScanProviders, build_providers, require_analyzer
+from app.pipeline.providers import (
+    ScanProviders,
+    build_providers,
+    require_analyzer,
+    require_fetcher,
+)
 from app.pipeline.risk_stage import CollectedRiskInputs, run_risk_stage
 from app.pipeline.sandbox_stage import run_sandbox_stage
-from app.pipeline.sandboxed import analyze_tree, extract_upload
+from app.pipeline.sandboxed import (
+    analyze_tree,
+    extract_upload,
+    fetch_artifact,
+    persist_tree,
+    staging_area,
+)
 from app.pipeline.sbom_stage import run_sbom_stage
 from app.pipeline.stages import skip_stage
 from app.pipeline.static_stage import StaticExtras, run_static_stage
 from app.pipeline.vuln_stage import run_vuln_stage
 from app.pipeline.workspace import MB, Workspace
 from app.sandbox_worker.protocol import AnalysisOut
-from app.scanners.git_fetch import CloneLimits, clone_repository
 from app.scanners.manifests import Manifest, ManifestScan, ProjectPackage
 from app.scanners.sbom.base import SbomResult
 from app.security.url_validation import validate_github_repo_url
@@ -101,13 +116,14 @@ class IngestEvidence:
 class CollectedSbom:
     """The SBOM the analyzer produced, served to run_sbom_stage through the provider interface.
 
-    Syft ran inside the analyzer container. The raw document is parsed here by
-    parse_cyclonedx, with its size and component caps, as untrusted input.
+    Syft ran inside the analyzer container. Its raw document arrived as a separate frame and
+    was spooled to `sbom_path`; run_sbom_stage parses it in a memory-limited child process.
     """
 
-    def __init__(self, name: str, collected: AnalysisOut) -> None:
+    def __init__(self, name: str, collected: AnalysisOut, sbom_path: Path) -> None:
         self.name = name
         self.collected = collected
+        self.sbom_path = sbom_path
 
     def generate(self, src_dir: object, work_dir: object) -> SbomResult:  # noqa: ARG002
         if self.collected.sbom_error is not None:
@@ -115,8 +131,20 @@ class CollectedSbom:
         sbom = self.collected.sbom
         if sbom is None:
             raise AppError(ErrorCode.ANALYZER_OUTPUT_INVALID, "The analyzer returned no SBOM", 502)
+        try:
+            raw = self.sbom_path.read_bytes()
+        except OSError as exc:
+            raise AppError(
+                ErrorCode.ANALYZER_OUTPUT_INVALID, "The SBOM frame was not received", 502
+            ) from exc
+        finally:
+            self.sbom_path.unlink(missing_ok=True)
+        if len(raw) != sbom.size or hashlib.sha256(raw).hexdigest() != sbom.sha256:
+            raise AppError(
+                ErrorCode.ANALYZER_OUTPUT_INVALID, "The SBOM does not match its description", 502
+            )
         return SbomResult(
-            raw=sbom.raw.encode("utf-8"),
+            raw=raw,
             source=sbom.source,
             tool_name=sbom.tool_name,
             tool_version=sbom.tool_version,
@@ -151,8 +179,8 @@ def _ingest(
     workspace: Workspace,
     settings: Settings,
     analyzer: ContentAnalyzer,
+    providers: ScanProviders,
 ) -> IngestEvidence:
-    max_bytes = settings.max_artifact_size_mb * MB
     artifact = scan.artifact
     archive_sha256: str | None = None
     commit_sha: str | None = None
@@ -165,29 +193,45 @@ def _ingest(
         revision_requested=scan.revision_requested,
     )
 
+    if not has_upload and artifact.source != ArtifactSource.GITHUB:
+        raise AppError(ErrorCode.INVALID_INPUT, "Unsupported source for a software scan", 400)
     if has_upload:
         if not workspace.upload_path.is_file():
             raise AppError(ErrorCode.WORKSPACE_ERROR, "Uploaded archive is missing", 500)
         # Hashing the raw bytes reads nothing as structure; extraction happens in the sandbox.
         archive_sha256 = sha256_file(workspace.upload_path)
-        extract_upload(session, scan, analyzer, job)
-    elif artifact.source == ArtifactSource.GITHUB:
-        # Re-validate (including DNS) just before network access.
-        repo = validate_github_repo_url(artifact.source_url)
-        result = clone_repository(
-            repo.clone_url,
-            workspace.src_dir,
-            scan.revision_requested,
-            CloneLimits(timeout_seconds=settings.git_clone_timeout_seconds, max_bytes=max_bytes),
-        )
-        commit_sha = result.commit_sha
     else:
-        raise AppError(ErrorCode.INVALID_INPUT, "Unsupported source for a software scan", 400)
+        # Re-validate (including DNS) before queuing the download. The egress proxy resolves
+        # and checks every address again at connection time.
+        validate_github_repo_url(artifact.source_url)
 
-    collected = analyze_tree(session, scan, analyzer, job)
-    if collected.tree.file_count == 0:
-        raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
-    tree = check_tree(collected, settings)
+    with staging_area(session, scan, settings, analyzer, job) as staging:
+        job = replace(job, staging_volume=staging.volume)
+        if has_upload:
+            extract_upload(session, scan, analyzer, job)
+        else:
+            fetched = fetch_artifact(
+                session,
+                scan,
+                require_fetcher(providers),
+                FetchJob(
+                    scan_id=scan.id,
+                    workspace=workspace,
+                    source="github",
+                    url=artifact.source_url,
+                    revision=scan.revision_requested,
+                    staging_volume=staging.volume,
+                    uid=staging.uid,
+                    gid=staging.gid,
+                ),
+            )
+            commit_sha = fetched.result.commit_sha
+
+        collected = analyze_tree(session, scan, analyzer, job)
+        if collected.tree.file_count == 0:
+            raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
+        tree = check_tree(collected, settings)
+        persist_tree(session, scan, analyzer, job, settings, collected.tree)
 
     return IngestEvidence(
         tree=tree,
@@ -222,7 +266,9 @@ def _run_evidence_stages(
         scan_id,
         workspace,
         settings,
-        CollectedSbom(collected.sbom_provider or settings.sbom_provider, collected),
+        CollectedSbom(
+            collected.sbom_provider or settings.sbom_provider, collected, ingested.sbom_path
+        ),
         ingested.evidence.project_packages,
     )
     if sbom is None:
@@ -248,6 +294,7 @@ class SoftwareIngest:
     evidence: IngestEvidence
     root_label: str
     file_paths: list[str]
+    sbom_path: Path
 
 
 def run_software_ingestion(
@@ -261,7 +308,7 @@ def run_software_ingestion(
     resolved = providers or build_providers(settings)
 
     def ingest(session: Session, scan: Scan, workspace: Workspace) -> SoftwareIngest:
-        evidence = _ingest(session, scan, workspace, settings, require_analyzer(resolved))
+        evidence = _ingest(session, scan, workspace, settings, require_analyzer(resolved), resolved)
         artifact = scan.artifact
         artifact.sha256 = evidence.tree.sha256
         artifact.collected_at = utcnow()
@@ -275,7 +322,9 @@ def run_software_ingestion(
             evidence.tree.file_count,
             evidence.tree.sha256,
         )
-        return SoftwareIngest(evidence, artifact.name, evidence.file_paths)
+        return SoftwareIngest(
+            evidence, artifact.name, evidence.file_paths, workspace.root / SBOM_INCOMING
+        )
 
     def evidence_stages(
         session: Session, sid: UUID, workspace: Workspace, ingested: SoftwareIngest

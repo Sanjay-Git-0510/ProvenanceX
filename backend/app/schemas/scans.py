@@ -76,6 +76,10 @@ _RUN_FIELDS = (
     "error_code",
     "isolation",
     "finished_at",
+    # Milestone B: fetch runs (source, what was fetched) and the tmpfs staging volume.
+    "source",
+    "fetched",
+    "staging",
 )
 _RUNTIME_FIELDS = (
     "image_id",
@@ -88,6 +92,10 @@ _RUNTIME_FIELDS = (
     "pids_limit",
     "tmp_mb",
     "timeout_seconds",
+    "deadline_seconds",
+    "cpu_seconds",
+    "network_internal",
+    "staging_volume",
 )
 
 

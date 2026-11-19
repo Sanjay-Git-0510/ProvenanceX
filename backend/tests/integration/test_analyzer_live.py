@@ -20,6 +20,7 @@ from app.pipeline.providers import build_providers
 from app.pipeline.workspace import create_workspace
 from tests.analyzer_helpers import ISOLATED
 from tests.conftest import SIMPLE_PROJECT, build_zip, symlink_info, zip_dir
+from tests.live_helpers import staged, unique
 from tests.model_helpers import reduce_pickle, torch_zip_bytes
 from tests.security.test_no_host_fallback import _client, _post
 
@@ -45,6 +46,7 @@ def _settings(tmp_path, **overrides) -> Settings:
         workspace_root=tmp_path / "ws",
         analyzer_image=IMAGE,
         sbom_provider="syft",
+        analyzer_instance=unique("pxlive"),
         **overrides,
     )
 
@@ -69,10 +71,11 @@ def _no_containers(scan_id) -> bool:
 def test_benign_upload_is_extracted_and_analyzed_in_isolation(tmp_path):
     settings = _settings(tmp_path)
     analyzer = DockerAnalyzer(settings)
-    job = _job(settings, zip_dir(SIMPLE_PROJECT))
-    extract = analyzer.run(job, "extract")
-    analyze = analyzer.run(job, "analyze")
-    for run in (extract, analyze):
+    with staged(settings, _job(settings, zip_dir(SIMPLE_PROJECT))) as job:
+        extract = analyzer.run(job, "extract")
+        analyze = analyzer.run(job, "analyze")
+        persist = analyzer.run(job, "persist")
+    for run in (extract, analyze, persist):
         assert run.result.status == "ok"
         assert run.result.isolation == ISOLATED  # what the kernel granted, seen from inside
         assert run.record["runtime_verified"] is True  # what docker inspect reported
@@ -80,6 +83,11 @@ def test_benign_upload_is_extracted_and_analyzed_in_isolation(tmp_path):
     a = analyze.analysis
     assert a.tree.sha256 == tree_digest(SIMPLE_PROJECT).sha256
     assert a.sbom is not None and a.sbom.tool_name == "syft" and a.sbom.source == "syft"
+    # The SBOM arrived as its own frame and matches its description (audit M3).
+    assert job.sbom_path.stat().st_size == a.sbom.size
+    # The persisted copy is exactly the analyzed tree (transfer integrity).
+    assert persist.result.persisted.sha256 == a.tree.sha256
+    assert tree_digest(job.workspace.src_dir).sha256 == a.tree.sha256
     assert _no_containers(job.scan_id)
 
 
@@ -94,8 +102,8 @@ def test_benign_upload_is_extracted_and_analyzed_in_isolation(tmp_path):
 )
 def test_unsafe_archives_are_rejected_inside_the_sandbox(tmp_path, entries, code):
     settings = _settings(tmp_path)
-    job = _job(settings, build_zip(entries))
-    run = DockerAnalyzer(settings).run(job, "extract")
+    with staged(settings, _job(settings, build_zip(entries))) as job:
+        run = DockerAnalyzer(settings).run(job, "extract")
     assert run.result.status == "error" and run.result.error.code == code
     assert not (job.workspace.root / "escape.txt").exists()
     assert not (settings.workspace_root / "escape.txt").exists()
@@ -108,7 +116,8 @@ def test_decompression_bomb_is_rejected(tmp_path):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("zeros.bin", b"\0" * (20 * 1024 * 1024))
-    run = DockerAnalyzer(settings).run(_job(settings, buf.getvalue()), "extract")
+    with staged(settings, _job(settings, buf.getvalue())) as job:
+        run = DockerAnalyzer(settings).run(job, "extract")
     assert run.result.status == "error"
     assert run.result.error.code in ("unsafe_archive", "artifact_too_large")
 
@@ -122,6 +131,7 @@ def test_full_software_scan_through_the_real_sandbox(
             "analyzer_image": IMAGE,
             "workspace_root": tmp_path / "ws",
             "max_artifact_size_mb": 50,
+            "analyzer_instance": unique("pxlive"),
         }
     )
     client = _client(settings, session_factory, build_providers(settings))
@@ -129,8 +139,11 @@ def test_full_software_scan_through_the_real_sandbox(
     assert body["status"] == "completed", body["error"]
     assert body["artifact"]["sha256"] == tree_digest(SIMPLE_PROJECT).sha256
     runs = body["sandbox"]["runs"]
-    assert [r["mode"] for r in runs] == ["extract", "analyze"]
-    assert all(r["runtime_verified"] and r["isolation"] == ISOLATED for r in runs)
+    assert [r["mode"] for r in runs] == ["hold", "extract", "analyze", "persist"]
+    assert all(r["runtime_verified"] for r in runs)
+    assert all(r["isolation"] == ISOLATED for r in runs if r["mode"] != "hold")
+    assert runs[0]["staging"]["type"] == "tmpfs"
+    assert _no_containers(body["scan_id"])
     assert body["stages"]["static"]["status"] in ("completed", "partial")
     assert body["stages"]["risk"]["status"] == "completed"
 
@@ -144,6 +157,7 @@ def test_model_with_a_dangerous_pickle_is_flagged_through_the_sandbox(
             "analyzer_image": IMAGE,
             "workspace_root": tmp_path / "ws",
             "max_artifact_size_mb": 50,
+            "analyzer_instance": unique("pxlive"),
         }
     )
     # Built by the suite's pickle helpers: bytes only; nothing here or in the sandbox loads it.

@@ -2,8 +2,9 @@
 
 Implements CLAUDE.md pipeline steps for AI artifacts:
   1. receive input / scan_id   (the API creates the Scan row and workspace)
-  2. safe working directory    (ZIP extraction in the analyzer sandbox, or a capped Hugging
-                                Face download)
+  2. safe working directory    (a kernel-capped tmpfs staging volume per scan; ZIP extraction
+                                in the analyzer sandbox, or a capped Hugging Face download in the
+                                isolated fetcher container behind the egress proxy)
   3. SHA-256                   (provenancex-tree-v1 over local content, computed in the
                                 analyzer; for HF also a manifest digest over the full listing)
   5. AI-BOM / lineage record   (inventory, formats, configs, card, adapters)  [aibom_stage]
@@ -14,10 +15,11 @@ Implements CLAUDE.md pipeline steps for AI artifacts:
  10. sandbox (optional)        (behavior features + behavioral Findings)       [sandbox_stage]
  11-18. risk                   (features, models, fusion, policy, SHAP, RiskDecision) [risk_stage]
 
-Nothing from the artifact is executed, imported or deserialized, and nothing is read on the
-host: every content-reading step (extraction, inventory, pickle/safetensors parsing, configs,
-model card, static analysis) runs in the analyzer container (app/pipeline/sandboxed.py). The
-stages here store its validated output. Without a working analyzer the scan fails. The
+Nothing from the artifact is executed, imported or deserialized, and nothing is downloaded or
+read on the host: the download runs in the fetcher container, and every content-reading step
+(extraction, inventory, pickle/safetensors parsing, configs, model card, static analysis)
+runs in the analyzer container (app/pipeline/sandboxed.py). The stages here store its
+validated output. Without a working fetcher or analyzer the scan fails. The
 lifecycle (failure handling, workspace cleanup) is shared with the software pipeline
 (lifecycle.py).
 """
@@ -26,7 +28,7 @@ import hashlib
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
 
@@ -37,23 +39,36 @@ from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.core.hashing import TREE_DIGEST_VERSION, sha256_file
 from app.db.models import ArtifactSource, Scan, utcnow
+from app.fetch.base import FetchJob, fetch_output_invalid, to_hf_result
 from app.pipeline.aibom_stage import run_aibom_stage
 from app.pipeline.anchor_stage import run_anchor_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.lineage_stage import run_lineage_stage
 from app.pipeline.ownership import ScanClaim
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
-from app.pipeline.providers import ScanProviders, build_providers, require_analyzer
+from app.pipeline.providers import (
+    ScanProviders,
+    build_providers,
+    require_analyzer,
+    require_fetcher,
+)
 from app.pipeline.risk_stage import CollectedRiskInputs, run_risk_stage
 from app.pipeline.sandbox_stage import run_sandbox_stage
-from app.pipeline.sandboxed import analyze_tree, extract_upload
+from app.pipeline.sandboxed import (
+    Staging,
+    analyze_tree,
+    extract_upload,
+    fetch_artifact,
+    persist_tree,
+    staging_area,
+)
 from app.pipeline.software import check_tree
 from app.pipeline.stages import skip_stage
 from app.pipeline.static_stage import StaticExtras, run_static_stage
 from app.pipeline.vuln_stage import run_vuln_stage
-from app.pipeline.workspace import MB, Workspace
+from app.pipeline.workspace import Workspace
 from app.sandbox_worker.protocol import AnalysisOut
-from app.scanners.hf.base import HfFetchLimits, HfFetchResult
+from app.scanners.hf.base import HfFetchResult
 from app.scanners.model.aibom import ModelContext
 from app.scanners.model.inventory import RemoteOnlyFile
 from app.security.url_validation import validate_hf_repo_url
@@ -94,19 +109,33 @@ def _write_private(path: os.PathLike[str], data: bytes) -> None:
 
 
 def _fetch_hf(
-    scan: Scan, workspace: Workspace, settings: Settings, providers: ScanProviders
+    session: Session,
+    scan: Scan,
+    workspace: Workspace,
+    providers: ScanProviders,
+    staging: Staging,
 ) -> HfFetchResult:
-    if providers.hf is None:
-        raise AppError(ErrorCode.HF_UNAVAILABLE, "No Hugging Face provider is configured", 503)
-    # Re-validate (including DNS) just before network access.
+    # Re-validate (including DNS) before queuing the download. The egress proxy resolves and
+    # checks every address again at connection time.
     repo = validate_hf_repo_url(scan.artifact.source_url)
-    limits = HfFetchLimits(
-        max_total_bytes=settings.max_artifact_size_mb * MB,
-        max_file_bytes=settings.hf_max_file_mb * MB,
-        max_files=min(settings.hf_max_files, settings.max_artifact_files),
-        timeout_seconds=settings.hf_download_timeout_seconds,
+    run = fetch_artifact(
+        session,
+        scan,
+        require_fetcher(providers),
+        FetchJob(
+            scan_id=scan.id,
+            workspace=workspace,
+            source="huggingface",
+            url=scan.artifact.source_url,
+            revision=scan.revision_requested,
+            staging_volume=staging.volume,
+            uid=staging.uid,
+            gid=staging.gid,
+        ),
     )
-    result = providers.hf.fetch(repo, scan.revision_requested, workspace.src_dir, limits)
+    result = to_hf_result(run.result)
+    if result.repo.repo_id != repo.repo_id or result.repo.repo_type != repo.repo_type:
+        raise fetch_output_invalid("the fetcher reported a different repository")
     listing = {
         "source": result.source,
         "repo_id": repo.repo_id,
@@ -154,7 +183,6 @@ def _ingest(
 ) -> ModelIngest:
     artifact = scan.artifact
     archive_sha256: str | None = None
-    hf: HfFetchResult | None = None
     has_upload = artifact.source == ArtifactSource.UPLOAD
 
     def job(model_context: dict[str, Any] | None = None) -> AnalysisJob:
@@ -167,16 +195,40 @@ def _ingest(
             model_context=model_context,
         )
 
+    if not has_upload and artifact.source != ArtifactSource.HUGGINGFACE:
+        raise AppError(ErrorCode.INVALID_INPUT, "Unsupported source for a model scan", 400)
     if has_upload:
         if not workspace.upload_path.is_file():
             raise AppError(ErrorCode.WORKSPACE_ERROR, "Uploaded archive is missing", 500)
         # Hashing the raw bytes reads nothing as structure; extraction happens in the sandbox.
         archive_sha256 = sha256_file(workspace.upload_path)
+    with staging_area(session, scan, settings, analyzer, job()) as staging:
+        return _ingest_staged(
+            session, scan, workspace, settings, providers, analyzer, job, staging, archive_sha256
+        )
+
+
+def _ingest_staged(
+    session: Session,
+    scan: Scan,
+    workspace: Workspace,
+    settings: Settings,
+    providers: ScanProviders,
+    analyzer: ContentAnalyzer,
+    make_job: Any,
+    staging: Staging,
+    archive_sha256: str | None,
+) -> ModelIngest:
+    artifact = scan.artifact
+    hf: HfFetchResult | None = None
+
+    def job(model_context: dict[str, Any] | None = None) -> AnalysisJob:
+        return replace(make_job(model_context), staging_volume=staging.volume)
+
+    if artifact.source == ArtifactSource.UPLOAD:
         extract_upload(session, scan, analyzer, job())
-    elif artifact.source == ArtifactSource.HUGGINGFACE:
-        hf = _fetch_hf(scan, workspace, settings, providers)
     else:
-        raise AppError(ErrorCode.INVALID_INPUT, "Unsupported source for a model scan", 400)
+        hf = _fetch_hf(session, scan, workspace, providers, staging)
 
     remote_only: list[RemoteOnlyFile] = []
     remote_hashes: dict[str, str | None] = {}
@@ -213,10 +265,12 @@ def _ingest(
         api_card_data=hf.card_data if hf else None,
         api_meta=hf.meta if hf else {},
     )
-    collected = analyze_tree(session, scan, analyzer, job(_context_payload(ctx)))
+    analysis_job = job(_context_payload(ctx))
+    collected = analyze_tree(session, scan, analyzer, analysis_job)
     if collected.tree.file_count == 0 and not (hf and hf.files):
         raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
     tree = check_tree(collected, settings)
+    persist_tree(session, scan, analyzer, analysis_job, settings, collected.tree)
 
     artifact.sha256 = tree.sha256
     artifact.collected_at = utcnow()

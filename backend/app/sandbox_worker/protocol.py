@@ -7,14 +7,14 @@ it against these models (unknown fields are rejected) before anything is stored.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from app.sandbox_worker.exitcodes import EXIT_CPU_LIMIT, EXIT_DEADLINE  # noqa: F401 - re-export
 
 REQUEST_FORMAT = "provenancex-analyzer-request-v1"
 RESULT_FORMAT = "provenancex-analyzer-result-v1"
 
-Mode = Literal["extract", "analyze"]
+Mode = Literal["extract", "analyze", "persist"]
 Kind = Literal["software", "model"]
 
 _HEX64 = r"^[0-9a-f]{64}$"
@@ -102,7 +102,13 @@ class ProjectPackageOut(_Strict):
 
 
 class SbomOut(_Strict):
-    raw: str
+    """The SBOM travels as its own frame (app/analysis/framing.py); this is its description.
+
+    The runner checks the received frame against `size` and `sha256` before using it.
+    """
+
+    size: int = Field(ge=0)
+    sha256: str = Field(pattern=_HEX64)
     source: Literal["syft", "mock"]
     tool_name: str = Field(max_length=128)
     tool_version: str | None = Field(default=None, max_length=128)
@@ -141,18 +147,24 @@ class WorkerResult(_Strict):
     mode: Mode
     status: Literal["ok", "error"]
     isolation_mode: Literal["container", "inprocess_test"]
-    isolation: dict[str, bool] = Field(max_length=32)
+    # StrictBool: "true", 1 or "yes" are refused, never coerced (audit finding L2).
+    isolation: dict[str, StrictBool] = Field(max_length=32)
     error: SectionError | None = None
     analysis: AnalysisOut | None = None
+    # persist mode: the digest of the tree as written to the persistent workspace. The runner
+    # requires it to equal the analyzed tree's digest (transfer integrity).
+    persisted: TreeOut | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "WorkerResult":
         if self.status == "error":
-            if self.error is None or self.analysis is not None:
+            if self.error is None or self.analysis is not None or self.persisted is not None:
                 raise ValueError("an error result carries exactly one error and no analysis")
         else:
             if self.error is not None:
                 raise ValueError("an ok result carries no error")
             if (self.mode == "analyze") != (self.analysis is not None):
                 raise ValueError("only an ok analyze result carries an analysis")
+            if (self.mode == "persist") != (self.persisted is not None):
+                raise ValueError("only an ok persist result carries the persisted tree")
         return self

@@ -1,7 +1,9 @@
 # Sandbox-only scanning
 
-_Status: master-prompt Phase 1, Milestone A (2026-11-18). Milestone B (download container,
-egress proxy) and C (expanded live tests) are not built yet. See "Not yet sandboxed" below._
+_Status: master-prompt Phase 1, Milestones A and A.1 (2026-11-18/19) and B (2026-11-19, awaiting
+review). Downloads now run in an isolated fetcher container behind an egress proxy, and every
+artifact tree lives in a kernel-capped tmpfs staging volume: see [fetcher.md](fetcher.md).
+Milestone C is not started. See "Not yet sandboxed" below._
 
 ## The rule
 
@@ -9,7 +11,9 @@ Every step that reads untrusted artifact content runs in a disposable **analyzer
 
 | Step | Where it runs |
 |---|---|
-| ZIP extraction (traversal, absolute-path, symlink, bomb, size and file-count checks) | analyzer, `extract` mode |
+| GitHub clone, Hugging Face download | fetcher container, behind the egress proxy ([fetcher.md](fetcher.md)) |
+| ZIP extraction (traversal, absolute-path, symlink, bomb, size and file-count checks) | analyzer, `extract` mode, into the kernel-capped staging volume |
+| Copy of the analyzed tree into the persistent workspace (for `/verify`) | analyzer, `persist` mode |
 | Tree SHA-256 (`provenancex-tree-v1`), file list | analyzer, `analyze` mode |
 | Manifest and project-package detection | analyzer |
 | Syft SBOM generation | analyzer (Syft 1.57.0, checksum-pinned in the image) |
@@ -50,7 +54,8 @@ Frontend -> API (queues only; no Docker, no socket)
 | Memory, no swap | `--memory=N --memory-swap=N` | `Memory == MemorySwap == N` | (OOM kill is reported) |
 | CPU, pids | `--cpus`, `--pids-limit` | `NanoCpus`, `PidsLimit` | |
 | Temp storage | `/tmp` tmpfs `noexec,nosuid,nodev,size=` | `Tmpfs` | |
-| Mounts | `src` read-only for `analyze`; only `extract` may write `src` | exact mount set, modes, subpaths | |
+| Mounts | staging volume read-only for `analyze`/`persist`/`hold`; `extract` writes only staging; `persist` writes only `src` | exact mount set, modes, subpaths, `volume-nocopy` | |
+| Hardening details (L3) | defaults kept | runtime `runc`, OOM killer on, `/dev/shm` ≤ 64 MiB, masked/read-only paths, `core=0` ulimit only, private cgroupns, no unconfined seccomp/AppArmor/SELinux, no sysctls/devices/ports/DNS, entrypoint | `Seccomp: 2` (`seccomp_filtered`), no secret-like env |
 | No IPC/PID/UTS/userns sharing, no devices | `--ipc=none` and nothing else allowed | `IpcMode`, `PidMode`, `UTSMode`, `UsernsMode`, `Devices`, `Binds` | |
 | No secrets | no `--env`, request on stdin | `Config.Env` has no secret-like names | |
 | No logs kept | `--log-driver=none` | `LogConfig.Type` | |
@@ -62,8 +67,12 @@ the created container before it starts. Any mismatch fails the scan with `sandbo
 the container never starts. The worker refuses to read the artifact if its own self-check fails.
 The runner also refuses any result whose self-check is not fully passing.
 
-Analyzer output is untrusted. The runner caps stdout (`ANALYZER_MAX_OUTPUT_MB`) and stderr, and
-rejects NaN, Infinity, deep nesting and unknown fields. It validates the result against
+Analyzer output is untrusted. Since Milestone B (audit M3) it is a framed stream: a JSON envelope
+capped by `ANALYZER_MAX_OUTPUT_MB` (12) and, separately, the raw SBOM (capped by `MAX_SBOM_MB`),
+which is spooled to a file and parsed in a memory-limited child process. Oversized frames are
+refused from their header. The envelope passes a structural JSON budget before decoding, and the
+runner rejects NaN, Infinity, deep nesting and unknown fields. The self-check report must have
+exactly the expected keys, each the boolean `true` (audit L2). It validates the result against
 `app/sandbox_worker/protocol.py`, then type-checks the AI-BOM and static documents
 (`app/analysis/codec.py`) before anything is stored.
 
@@ -169,12 +178,12 @@ self-check results, exit code, OOM and timeout flags, and duration. Failed runs 
 | `tests/integration/test_scan_ownership_pg.py` | On real PostgreSQL in a throwaway schema: concurrent runners claim each scan once, concurrent recoverers recover once, recovery skips a scan whose owner is committing, an owner's commit waits for recovery and is refused, runner A finishing after runner B's recovery changes nothing, heartbeat on a long scan, anchoring by an old claim | `pytest tests/integration/test_scan_ownership_pg.py` (needs `DATABASE_URL`) |
 | `tests/integration/test_runner_kill_live.py` | SIGKILL of a runner mid-analysis on real Docker: the container outlives it, stops at its own deadline, restart recovery removes it and the workspace, other deployments' and unlabelled containers survive, a repeat pass is harmless | `PROVENANCEX_SANDBOX_TESTS=1 pytest tests/integration/test_runner_kill_live.py` |
 | `tests/integration/test_analyzer_live.py` | The real image: isolation self-check, traversal, absolute paths, symlinks, bombs, full software and model scans, no leftover containers | `PROVENANCEX_SANDBOX_TESTS=1 pytest tests/integration/test_analyzer_live.py` |
+| Milestone B suites | Fetcher, egress proxy, staging, watchdog, L2/L3/M3: see the table in [fetcher.md](fetcher.md#tests) | see fetcher.md |
 
 ## Not yet sandboxed (tracked)
 
-- **Downloads** (GitHub clone, Hugging Face fetch) still run in the scan runner, with the existing
-  URL, DNS, redirect, size and time checks. They write bytes only and parse nothing structural.
-  Milestone B moves them into a fetch container behind an allowlisting egress proxy.
+- ~~Downloads~~: done in Milestone B. They run in the fetcher container behind the egress proxy,
+  and the runner has no git and no download path ([fetcher.md](fetcher.md)).
 - **`POST /scans/{id}/verify`** re-hashes the kept tree in the API process
   (`app/blockchain/verification.py`, `tree_digest`). This reads file bytes with `lstat` and rejects
   symlinks and special files, but it is still a host read of untrusted files. It is the one

@@ -12,6 +12,7 @@ cannot bypass the size limits. Files are opened with 'xb' and are never overwrit
 On any error the caller removes the whole workspace.
 """
 
+import errno
 import re
 import stat
 import zipfile
@@ -20,6 +21,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.errors import AppError, ErrorCode
+
+
+def storage_limit_error() -> AppError:
+    return AppError(
+        ErrorCode.STORAGE_LIMIT_EXCEEDED,
+        "The artifact exceeds the staging storage limit (the kernel refused the write)",
+        413,
+    )
+
 
 CHUNK_SIZE = 1024 * 1024
 _DRIVE_RE = re.compile(r"^[A-Za-z]:")
@@ -157,6 +167,17 @@ def safe_extract_zip(zip_path: Path, dest: Path, limits: ArchiveLimits) -> Extra
                 raise _unsafe("overall compression ratio exceeds limit")
     except AppError:
         raise
+    except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            # The kernel-capped staging volume is full (audit finding L1): a real write limit,
+            # independent of the byte count kept above.
+            raise storage_limit_error() from exc
+        raise AppError(
+            ErrorCode.INVALID_ARCHIVE,
+            "Archive could not be read or extracted",
+            400,
+            {"reason": exc.__class__.__name__},
+        ) from exc
     except (
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
@@ -164,7 +185,6 @@ def safe_extract_zip(zip_path: Path, dest: Path, limits: ArchiveLimits) -> Extra
         RuntimeError,
         EOFError,
         zlib.error,
-        OSError,
         ValueError,
     ) as exc:
         raise AppError(

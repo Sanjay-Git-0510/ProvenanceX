@@ -1,5 +1,9 @@
 """Hardened shallow git fetch of a pre-validated repository URL.
 
+Runs only inside the isolated fetcher container (require_fetch_context), never in the
+scan-runner (audit finding H1). There, every connection goes through the egress proxy
+(`http.proxy`); the container's network has no other route out.
+
 Safety measures (CLAUDE.md security boundary 3):
 - Depth-1, single-branch clone with no submodule recursion.
 - Hooks disabled (core.hooksPath=/dev/null). Symlinks are checked out as plain files.
@@ -22,7 +26,9 @@ from pathlib import Path
 
 from app.core.errors import AppError, ErrorCode
 from app.pipeline.workspace import directory_size
+from app.security.archive import storage_limit_error
 from app.security.revision import is_commit_sha
+from app.security.sandbox_guard import require_fetch_context
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +65,10 @@ def git_env(home: Path, allowed_protocol: str = "https") -> dict[str, str]:
     }
 
 
-def git_base_command(allowed_protocol: str = "https") -> list[str]:
+def git_base_command(allowed_protocol: str = "https", proxy_url: str | None = None) -> list[str]:
     """`git` with hardening `-c` options that apply to every subcommand."""
     settings = [
+        f"http.proxy={proxy_url or ''}",
         f"core.hooksPath={os.devnull}",
         "core.symlinks=false",
         "core.fsmonitor=false",
@@ -145,6 +152,8 @@ def run_limited_command(
             stderr_file.seek(0)
             tail = stderr_file.read()[-STDERR_TAIL_BYTES:].decode("utf-8", "replace").strip()
             logger.warning("git exited with %s: %s", returncode, tail)
+            if "No space left on device" in tail:
+                raise storage_limit_error()
             raise AppError(
                 ErrorCode.CLONE_FAILED,
                 "git command failed",
@@ -177,19 +186,21 @@ def clone_repository(
     limits: CloneLimits,
     *,
     allowed_protocol: str = "https",
+    proxy_url: str | None = None,
 ) -> CloneResult:
     """Fetch `url` at `revision` (or the default branch) into the empty directory `dest`.
 
     `url` must already have passed the URL validation in app.security. Tests pass
     allowed_protocol="file" to clone local fixture repositories.
     """
+    require_fetch_context()
     if not url.startswith(f"{allowed_protocol}://"):
         raise AppError(ErrorCode.URL_NOT_ALLOWED, "Repository URL protocol not allowed", 400)
     if not dest.is_dir() or any(dest.iterdir()):
         raise AppError(ErrorCode.WORKSPACE_ERROR, "Clone destination must be empty", 500)
 
     env = git_env(dest.parent, allowed_protocol)
-    base = git_base_command(allowed_protocol)
+    base = git_base_command(allowed_protocol, proxy_url)
     deadline = time.monotonic() + limits.timeout_seconds
 
     def run(cmd: list[str]) -> None:

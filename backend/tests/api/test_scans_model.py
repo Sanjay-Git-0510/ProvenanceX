@@ -530,3 +530,13 @@ def test_software_scan_merges_project_package_into_root(scan_client):
     assert graph["features"]["root_package_count"] == 1
     direct = [n for n in graph["nodes"] if n["attributes"].get("depth") == 1]
     assert direct
+
+
+def test_fetcher_reporting_another_commit_than_the_pinned_one_fails(
+    test_settings, session_factory, public_dns
+):
+    """The runner re-checks a pinned revision instead of trusting the (untrusted) fetcher."""
+    client = client_with(test_settings, session_factory, StubHf({"config.json": b"{}"}))
+    body = post_url(client, revision="e" * 40)  # StubHf answers with COMMIT, not this one
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "fetch_output_invalid"
