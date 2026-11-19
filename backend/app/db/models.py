@@ -111,6 +111,7 @@ class Artifact(Base):
 
 class Scan(Base):
     __tablename__ = "scans"
+    __table_args__ = (Index("ix_scans_status_heartbeat", "status", "heartbeat_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     artifact_id: Mapped[uuid.UUID] = mapped_column(
@@ -130,7 +131,20 @@ class Scan(Base):
     stages: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
     # SHA-256 of the raw SBOM document as produced (off-chain file; hash anchored in Phase 7).
     bom_sha256: Mapped[str | None] = mapped_column(String(64))
+    # Isolated analyzer runs that produced this scan's evidence (provider, image, verified
+    # runtime limits, exit code, duration). Never holds host paths or artifact content.
+    sandbox: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When a scan-runner claimed the scan (QUEUED -> RUNNING); used to fail abandoned claims.
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Ownership of a RUNNING scan (app/pipeline/ownership.py). A claim gets a fresh token; every
+    # write by the runner is fenced on it, and stale recovery replaces it, so a runner whose
+    # claim expired can no longer change the scan. Never exposed by the API.
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # Which runner instance holds the claim (hostname or RUNNER_ID), for startup recovery.
+    claimed_by: Mapped[str | None] = mapped_column(String(128))
+    # Renewed by the owning runner while the scan runs; a missing heartbeat marks it stale.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -23,7 +23,7 @@ from app.scanners.hf.base import HfFetchResult, HfFile
 from app.scanners.sbom.mock import MockSbomProvider
 from app.scanners.vulns.mock import MockVulnProvider
 from app.security.url_validation import HfRepo
-from tests.conftest import FIXTURES, build_zip, zip_dir
+from tests.conftest import FIXTURES, attach_test_analyzer, build_zip, zip_dir
 from tests.model_helpers import safetensors_bytes
 
 URL = "/api/v1/scans/model"
@@ -51,6 +51,7 @@ def client_with(test_settings, session_factory, hf, vulns=None) -> TestClient:
     providers = ScanProviders(
         sbom=MockSbomProvider(), vulns=vulns or MockVulnProvider(), nvd=None, hf=hf
     )
+    attach_test_analyzer(providers, test_settings)
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_session_factory] = lambda: session_factory

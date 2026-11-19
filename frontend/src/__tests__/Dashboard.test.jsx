@@ -15,7 +15,7 @@ import {
 } from "../test/helpers.jsx";
 
 const ALLOW_ROW = scanRow({ decision: "ALLOW", risk_score: 0.3, confidence: 0.61 });
-const NULL_ROW = scanRow({ scan_id: SCAN_B, artifact: { name: "old-scan", artifact_type: "model", source: "upload" } });
+const NULL_ROW = scanRow({ scan_id: SCAN_B, status: "running", artifact: { name: "old-scan", artifact_type: "model", source: "upload" } });
 
 function stubDashboard(items, extra = []) {
   return mockApi([
@@ -38,7 +38,15 @@ describe("Dashboard", () => {
     expect(calledUrls(fetchMock)).toContain("/api/v1/scans?limit=20&offset=0");
   });
 
-  it("shows a null decision and score as not computed yet, never 0", async () => {
+  it("hides completed scans with no computed decision", async () => {
+    const done = scanRow({ scan_id: SCAN_B, status: "completed", artifact: { name: "old-scan", artifact_type: "model", source: "upload" } });
+    stubDashboard([ALLOW_ROW, done]);
+    renderPage(<Dashboard />);
+    await within(recentPanel()).findByRole("link", { name: "demo-app" });
+    expect(within(recentPanel()).queryByRole("link", { name: "old-scan" })).not.toBeInTheDocument();
+  });
+
+  it("shows a running scan's null decision as not computed yet, never 0", async () => {
     stubDashboard([NULL_ROW]);
     renderPage(<Dashboard />);
     const row = (await within(recentPanel()).findByRole("link", { name: "old-scan" })).closest("tr");
@@ -97,10 +105,10 @@ describe("Dashboard", () => {
   it("counts decisions and says how many scans it covered", async () => {
     stubDashboard([ALLOW_ROW, NULL_ROW]);
     const { container } = renderPage(<Dashboard />);
-    await screen.findByText("Latest 2 scans");
+    await screen.findByText("Latest 1 scans");
     const rows = container.querySelectorAll(".summary-row");
+    expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("ALLOW1");
-    expect(rows[3]).toHaveTextContent("Not computed yet1");
     expect(rows[0]).toHaveTextContent("Confidence: 0.61");
     expect(rows[0]).toHaveTextContent("Not evaluated: listed on each scan");
   });
@@ -148,7 +156,7 @@ describe("Dashboard", () => {
 
   it("pages through scans", async () => {
     const fetchMock = mockApi([
-      [/limit=20&offset=20/, scanList([scanRow({ artifact: { name: "page-two", artifact_type: "software", source: "upload" } })], { total: 21, offset: 20 })],
+      [/limit=20&offset=20/, scanList([scanRow({ decision: "REVIEW", risk_score: 0.5, artifact: { name: "page-two", artifact_type: "software", source: "upload" } })], { total: 21, offset: 20 })],
       [/\/scans\?/, scanList([NULL_ROW], { total: 21, has_more: true })],
     ]);
     renderPage(<Dashboard />);
@@ -159,7 +167,7 @@ describe("Dashboard", () => {
   });
 
   it("redacts a host path in an artifact name", async () => {
-    stubDashboard([scanRow({ artifact: { name: "/home/victim/app", artifact_type: "software", source: "upload" } })]);
+    stubDashboard([scanRow({ decision: "REVIEW", risk_score: 0.5, artifact: { name: "/home/victim/app", artifact_type: "software", source: "upload" } })]);
     const { container } = renderPage(<Dashboard />);
     await within(recentPanel()).findByRole("link", { name: "[redacted]" });
     expect(container).not.toHaveTextContent("/home/victim");

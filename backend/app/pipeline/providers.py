@@ -10,9 +10,12 @@ from dataclasses import dataclass
 
 import httpx
 
+from app.analysis.base import ContentAnalyzer
+from app.analysis.factory import build_analyzer
 from app.blockchain.base import ChainProvider
 from app.blockchain.mock import MockChainProvider
 from app.core.config import Settings
+from app.core.errors import AppError, ErrorCode
 from app.pipeline.workspace import MB
 from app.scanners.hf.base import HfProvider
 from app.scanners.hf.client import HuggingFaceProvider
@@ -39,6 +42,19 @@ class ScanProviders:
     hf: HfProvider | None = None
     sandbox: SandboxProvider | None = None  # None: SANDBOX_PROVIDER=disabled
     chain: ChainProvider | None = None  # None: BLOCKCHAIN_PROVIDER=disabled
+    # The isolated analyzer every content-reading step runs in. None is never a fallback:
+    # require_analyzer() fails the scan with sandbox_unavailable.
+    analyzer: ContentAnalyzer | None = None
+
+
+def require_analyzer(providers: ScanProviders) -> ContentAnalyzer:
+    if providers.analyzer is None:
+        raise AppError(
+            ErrorCode.SANDBOX_UNAVAILABLE,
+            "No analyzer sandbox is configured; the artifact was not processed",
+            503,
+        )
+    return providers.analyzer
 
 
 def _client_factory(
@@ -147,4 +163,5 @@ def build_providers(
         hf=hf,
         sandbox=_sandbox(settings),
         chain=build_chain_provider(settings),
+        analyzer=build_analyzer(settings),
     )

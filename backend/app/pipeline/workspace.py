@@ -82,6 +82,11 @@ def remove_workspace(workspace: Workspace, base: Path) -> None:
         logger.exception("Failed to remove workspace %s", root)
 
 
+def discard_workspace(base: Path, scan_id: UUID) -> None:
+    """Remove a scan's workspace if it exists (stale recovery). Same guards as remove_workspace."""
+    remove_workspace(Workspace(_workspace_root(base, scan_id)), base)
+
+
 def resolve_within(base: Path, *parts: str) -> Path:
     """Join `parts` onto base and raise if the result escapes base."""
     base_resolved = base.resolve()

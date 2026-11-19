@@ -45,6 +45,7 @@ from app.scanners.hf.base import HfFetchResult, HfFile
 from app.scanners.sandbox.base import SandboxRun
 from app.scanners.sbom.base import SbomResult
 from app.scanners.vulns.base import Advisory, VulnLookupResult
+from tests.conftest import attach_test_analyzer
 
 SEED = 7
 ALL_COMPLETED = Availability(
@@ -153,6 +154,8 @@ def _settings(tmp_path) -> Settings:
         workspace_root=tmp_path / "workspaces",
         nvd_enabled=False,
         model_path=tmp_path / "no-models",
+        app_env="test",
+        analyzer_provider="inprocess_test",
     )
 
 
@@ -191,6 +194,7 @@ def _live_scan(family, variant_index, state, settings, session_factory, monkeypa
         hf=FakeHf(state),
         sandbox=FakeSandbox(_trace_bundle(state, rng)),
     )
+    attach_test_analyzer(providers, settings)
     scan_id = uuid.uuid4()
     workspace = create_workspace(settings.workspace_root, scan_id)
     if family.is_upload:

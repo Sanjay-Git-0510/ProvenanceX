@@ -222,12 +222,14 @@ def test_computation_error_is_explicit_and_not_stored(client, session_factory, m
     monkeypatch.setattr("app.pipeline.risk_stage.compute_decision", fail)
     scan_id = _upload(client)
     scan = client.get(f"/api/v1/scans/{scan_id}").json()
-    assert scan["status"] == "completed"  # a failed risk stage never fails the scan
+    # A scan only completes with a stored decision, so it can never sit at "Not computed yet".
+    assert scan["status"] == "failed"
+    assert scan["error"]["code"] == "risk_not_computed"
     assert scan["stages"]["risk"]["status"] == "error"
     assert "boom" not in str(scan["stages"]["risk"])
     body = _risk(client, scan_id)
     assert body["status"] == "not_computed"
-    assert body["reason"]["code"] == "risk_computation_error"
+    assert body["reason"]["code"] == "scan_failed"
     assert "boom" not in str(body)
     assert body["risk_score"] is None
     assert _stored_count(session_factory) == 0

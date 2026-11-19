@@ -86,7 +86,8 @@ def test_stage_failure_is_recorded_and_scan_completes(scan_client, monkeypatch):
     def boom(*_a, **_k):
         raise RuntimeError("secret internals")
 
-    monkeypatch.setattr("app.pipeline.static_stage.analyze_artifact", boom)
+    # Static analysis runs inside the analyzer worker (sandbox-only scanning).
+    monkeypatch.setattr("app.sandbox_worker.collect.analyze_artifact", boom)
     body = upload(scan_client, SOFTWARE, [("a.py", "x=1\n")])
     stage = body["stages"]["static"]
     assert body["status"] == "completed"

@@ -2,18 +2,13 @@
 
 Every error response uses the envelope:
     {"error": {"code": str, "message": str, "details": object | null}}
+
+This module has no web-framework imports, so the analyzer sandbox can use the error types
+without FastAPI. The HTTP exception handlers live in app/core/error_handlers.py.
 """
 
-import logging
 from enum import StrEnum
 from typing import Any
-
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-logger = logging.getLogger(__name__)
 
 
 class ErrorCode(StrEnum):
@@ -52,6 +47,8 @@ class ErrorCode(StrEnum):
     SANDBOX_UNAVAILABLE = "sandbox_unavailable"
     SANDBOX_FAILED = "sandbox_failed"
     SANDBOX_REFUSED = "sandbox_refused"
+    ANALYZER_OUTPUT_INVALID = "analyzer_output_invalid"
+    RUNNER_INTERRUPTED = "runner_interrupted"
     BLOCKCHAIN_DISABLED = "blockchain_disabled"
     CHAIN_REFUSED = "chain_refused"
     CHAIN_UNAVAILABLE = "chain_unavailable"
@@ -64,6 +61,7 @@ class ErrorCode(StrEnum):
     ANCHOR_ALREADY_EXISTS = "anchor_already_exists"
     ANCHOR_IN_PROGRESS = "anchor_in_progress"
     ANCHOR_CONFLICT = "anchor_conflict"
+    RISK_NOT_COMPUTED = "risk_not_computed"
     SCAN_NOT_FOUND = "scan_not_found"
     DATABASE_UNAVAILABLE = "database_unavailable"
     INTERNAL_ERROR = "internal_error"
@@ -86,39 +84,8 @@ def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details}}
 
 
-async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
-    logger.warning("AppError %s: %s", exc.code, exc.message)
-    return JSONResponse(
-        status_code=exc.status_code, content=error_body(exc.code, exc.message, exc.details)
-    )
+def register_error_handlers(app: Any) -> None:
+    """Kept for existing imports; see app/core/error_handlers.py."""
+    from app.core.error_handlers import install_error_handlers
 
-
-async def _http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-    code = "not_found" if exc.status_code == 404 else f"http_{exc.status_code}"
-    return JSONResponse(status_code=exc.status_code, content=error_body(code, str(exc.detail)))
-
-
-async def _validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-    details = [
-        {"loc": list(e.get("loc", [])), "msg": e.get("msg"), "type": e.get("type")}
-        for e in exc.errors()
-    ]
-    return JSONResponse(
-        status_code=422,
-        content=error_body("validation_error", "Request validation failed", details),
-    )
-
-
-async def _unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
-    # Log with traceback; never leak internals to the client.
-    logger.exception("Unhandled error: %s", exc)
-    return JSONResponse(
-        status_code=500, content=error_body("internal_error", "An internal error occurred")
-    )
-
-
-def register_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(AppError, _app_error_handler)
-    app.add_exception_handler(StarletteHTTPException, _http_error_handler)
-    app.add_exception_handler(RequestValidationError, _validation_error_handler)
-    app.add_exception_handler(Exception, _unhandled_error_handler)
+    install_error_handlers(app)

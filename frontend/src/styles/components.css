@@ -472,3 +472,129 @@ button.chip:hover {
 .panel {
   min-width: 0;
 }
+
+/* Scan progress overlay: solid card on the glass backdrop. */
+.scan-progress {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.scan-progress__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.scan-progress__artifact {
+  min-width: 0;
+}
+
+.scan-progress__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-progress__type {
+  color: var(--text-secondary);
+  font-size: var(--text-14);
+}
+
+.scan-progress__timer {
+  font-family: var(--font-mono);
+  font-size: var(--text-30);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-progress__error {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--status-block);
+  border-radius: var(--radius-control);
+  background: var(--status-block-tint);
+  color: var(--status-block);
+  font-size: var(--text-14);
+  overflow-wrap: anywhere;
+}
+
+.scan-progress__note {
+  color: var(--text-tertiary);
+  font-size: var(--text-12);
+}
+
+.stepper {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepper__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-14);
+}
+
+.stepper__marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-12);
+}
+
+.stepper__item--active {
+  color: var(--text-primary);
+}
+
+.stepper__item--active .stepper__marker {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stepper__item--done {
+  color: var(--text-secondary);
+}
+
+.stepper__item--done .stepper__marker {
+  border-color: var(--status-allow);
+  color: var(--status-allow);
+}
+
+.stepper__item--failed {
+  color: var(--status-block);
+}
+
+.stepper__item--failed .stepper__marker {
+  border-color: var(--status-block);
+}
+
+.stepper__spin {
+  animation: stepper-spin 1s linear infinite;
+}
+
+@keyframes stepper-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper__spin {
+    animation: none;
+  }
+}
+
+@media (min-width: 40rem) {
+  .modal-backdrop {
+    align-items: center;
+  }
+}

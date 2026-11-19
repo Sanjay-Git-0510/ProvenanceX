@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
+import ScanProgressModal from "../components/scan/ScanProgressModal.jsx";
 import Button from "../components/ui/Button.jsx";
 import ErrorState from "../components/ui/ErrorState.jsx";
 import Panel from "../components/ui/Panel.jsx";
@@ -45,7 +45,8 @@ function validate({ kind, mode, url, file }) {
 }
 
 export default function NewScan() {
-  const navigate = useNavigate();
+  const [active, setActive] = useState(null);
+  const lastRun = useRef(null);
   const [kind, setKind] = useState("software");
   const [mode, setMode] = useState("url");
   const [url, setUrl] = useState("");
@@ -57,12 +58,29 @@ export default function NewScan() {
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function submit(event) {
+  /** Create the scan, then hand it to the progress overlay. The form stays locked meanwhile. */
+  async function start(run) {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const created =
+        run.kind === "software"
+          ? await api.createSoftwareScan(run.input)
+          : await api.createModelScan({ ...run.input, artifactType: run.artifactType });
+      if (!isScanId(created?.scan_id)) throw new Error("The API returned an invalid scan ID.");
+      setActive({ scanId: created.scan_id, artifact: run.artifact });
+    } catch (err) {
+      setError(err);
+      setSubmitting(false);
+    }
+  }
+
+  function submit(event) {
     event.preventDefault();
     const problem = validate({ kind, mode, url, file });
     setInvalid(problem);
     setError(null);
-    if (problem) return;
+    if (problem || submitting) return;
 
     const input = {
       sourceUrl: mode === "url" ? url.trim() : undefined,
@@ -70,16 +88,20 @@ export default function NewScan() {
       revision: revision.trim(),
       name: name.trim(),
     };
-    setSubmitting(true);
-    try {
-      const created =
-        kind === "software" ? await api.createSoftwareScan(input) : await api.createModelScan({ ...input, artifactType });
-      if (!isScanId(created?.scan_id)) throw new Error("The API returned an invalid scan ID.");
-      navigate(`/scans/${created.scan_id}`);
-    } catch (err) {
-      setError(err);
-      setSubmitting(false);
-    }
+    const source = mode === "url" ? url.trim().replace(/^https:\/\//, "") : file.name;
+    const typeLabel = kind === "software" ? "Software" : { model: "Model", lora: "LoRA adapter", dataset: "Dataset" }[artifactType];
+    lastRun.current = { kind, input, artifactType, artifact: { name: input.name || source, type: typeLabel } };
+    start(lastRun.current);
+  }
+
+  function closeProgress() {
+    setActive(null);
+    setSubmitting(false);
+  }
+
+  function retry() {
+    setActive(null);
+    start(lastRun.current);
   }
 
   const { placeholder } = KINDS[kind];
@@ -167,6 +189,9 @@ export default function NewScan() {
           </div>
         </form>
       </Panel>
+      {active ? (
+        <ScanProgressModal scanId={active.scanId} artifact={active.artifact} onRetry={retry} onClose={closeProgress} />
+      ) : null}
     </>
   );
 }

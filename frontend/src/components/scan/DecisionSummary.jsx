@@ -1,4 +1,3 @@
-import { CircleDashed } from "lucide-react";
 import { formatConfidence, formatCount, NOT_COMPUTED } from "../../lib/format.js";
 import AllowCaveat from "../risk/AllowCaveat.jsx";
 import Badge from "../ui/Badge.jsx";
@@ -7,7 +6,6 @@ const ROWS = [
   { key: "ALLOW", tone: "allow" },
   { key: "REVIEW", tone: "review" },
   { key: "BLOCK", tone: "block" },
-  { key: null, label: NOT_COMPUTED, icon: CircleDashed, tone: "neutral" },
 ];
 
 function confidenceRange(scans) {
@@ -38,13 +36,14 @@ function Row({ row, count, total, children }) {
 
 /** Decisions among the scans passed in. It counts stored decisions and infers nothing. */
 export default function DecisionSummary({ scans }) {
+  const total = scans.filter((scan) => ROWS.some((row) => row.key === scan.decision)).length;
   const allowed = scans.filter((scan) => scan.decision === "ALLOW");
   return (
     <ul className="summary-list">
       {ROWS.map((row) => {
-        const count = scans.filter((scan) => (scan.decision ?? null) === row.key).length;
+        const count = scans.filter((scan) => scan.decision === row.key).length;
         return (
-          <Row key={row.key ?? "none"} row={row} count={count} total={scans.length}>
+          <Row key={row.key ?? "none"} row={row} count={count} total={total}>
             {row.key === "ALLOW" ? (
               <AllowCaveat confidenceText={confidenceRange(allowed)} layersNote="listed on each scan" />
             ) : null}

@@ -15,7 +15,6 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import AppError
 from app.db.models import (
     Finding,
     GraphEdge,
@@ -29,11 +28,9 @@ from app.db.models import (
 from app.ml.comparison import (
     ScanSnapshot,
     compare_snapshots,
-    declared_versions,
     version_consistency,
 )
 from app.ml.features import FeatureExtraction, extract_features, stage_null_reason
-from app.pipeline.workspace import open_workspace
 from app.risk.explain import explain_random_forest, not_evaluated_features, unavailable
 from app.risk.model_runtime import (
     TRAINED_ARTIFACT_TYPES,
@@ -146,14 +143,11 @@ def _comparison(
     return result
 
 
-def _version_consistency(scan: Scan, settings: Settings) -> bool | None:
-    """Compare declared versions in the kept workspace. Files are only parsed, with size limits."""
-    try:
-        workspace = open_workspace(Path(settings.workspace_root), scan.id)
-        return version_consistency(declared_versions(workspace.src_dir, scan.revision_requested))
-    except (AppError, OSError) as exc:
-        logger.warning("Scan %s: version consistency unavailable: %s", scan.id, type(exc).__name__)
+def _version_consistency(declared: dict[str, str] | None) -> bool | None:
+    """Compare the versions the analyzer found declared in the artifact (None: not evaluated)."""
+    if declared is None:
         return None
+    return version_consistency(declared)
 
 
 def _finding_refs(session: Session, scan_id: Any) -> tuple[FindingRef, ...]:
@@ -245,7 +239,12 @@ def _hard_rule_evidence(
 
 
 def compute_decision(
-    session: Session, scan: Scan, settings: Settings, config_sha256: str | None = None
+    session: Session,
+    scan: Scan,
+    settings: Settings,
+    config_sha256: str | None = None,
+    *,
+    declared_versions: dict[str, str] | None = None,
 ) -> RiskDecision:
     """Build the decision row from a scan's stored evidence. The caller persists it."""
     record = _provenance_row(session, scan.id)
@@ -256,7 +255,7 @@ def compute_decision(
         scan.stages or {},
         _provenance_document(record),
         _comparison(session, scan, record, config_sha256),
-        _version_consistency(scan, settings),
+        _version_consistency(declared_versions),
     )
     outputs, ml_reason, shap_result, training_data = _run_models(scan, extraction, settings)
     assessment = assess_risk(

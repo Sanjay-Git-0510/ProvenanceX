@@ -74,10 +74,14 @@ contract=$(sed -n 's/.*"contract_address":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' <<<"
 export DATABASE_URL="postgresql+psycopg://provenancex:provenancex-e2e@127.0.0.1:$DB_PORT/provenancex"
 export BLOCKCHAIN_PROVIDER=web3 BLOCKCHAIN_RPC_URL="http://127.0.0.1:$CHAIN_PORT"
 export BLOCKCHAIN_CONTRACT_ADDRESS="$contract" BLOCKCHAIN_ANCHOR_ON_SCAN=false
+# Optional behavioral analysis stays off; content analysis always runs in the analyzer sandbox.
 export SBOM_PROVIDER=syft VULN_PROVIDER=osv NVD_ENABLED=false SANDBOX_PROVIDER=disabled
 export MODEL_PATH=../ml/models
 export PROVENANCEX_CHAIN_TESTS=1 PROVENANCEX_NETWORK_TESTS=1
 export PROVENANCEX_E2E_REPORT="$report_dir/report.jsonl"
+
+echo "Building the analyzer sandbox image"
+docker build -q -f docker/analyzer/Dockerfile -t provenancex-analyzer:0.1.0 backend >/dev/null
 
 cd backend
 .venv/bin/alembic upgrade head

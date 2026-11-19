@@ -44,8 +44,26 @@ def test_alembic_upgrade_head(engine):
     head = ScriptDirectory.from_config(cfg).get_current_head()
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert head == "0006"  # bump when a new migration is added
+    assert head == "0008"  # bump when a new migration is added
     assert version == head
+
+
+def test_scan_sandbox_columns_exist_after_upgrade(engine):
+    """Migration 0007: the sandbox run record and the runner claim time."""
+    from sqlalchemy import inspect
+
+    columns = {c["name"] for c in inspect(engine).get_columns("scans")}
+    assert {"sandbox", "claimed_at"} <= columns
+
+
+def test_scan_claim_columns_exist_after_upgrade(engine):
+    """Migration 0008: claim token, claiming runner and heartbeat (M2 fencing)."""
+    from sqlalchemy import inspect
+
+    columns = {c["name"] for c in inspect(engine).get_columns("scans")}
+    assert {"claim_token", "claimed_by", "heartbeat_at"} <= columns
+    indexes = {i["name"] for i in inspect(engine).get_indexes("scans")}
+    assert "ix_scans_status_heartbeat" in indexes
 
 
 def test_phase1_tables_exist_after_upgrade(engine):

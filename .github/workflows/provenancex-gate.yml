@@ -40,8 +40,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Start the API
-        run: docker compose up --build --wait --wait-timeout 300 api
+      # Scans run only in the analyzer sandbox: build its image and start the scan runner, the
+      # one service with the Docker socket. Without them every scan fails or stays queued, and
+      # the gate exits 2 (it can never pass without a sandboxed scan).
+      - name: Build the analyzer sandbox image
+        run: docker compose --profile analyzer-image build analyzer-image
+      - name: Start the API and the scan runner
+        run: |
+          export DOCKER_SOCKET_GID="$(stat -c %g /var/run/docker.sock)"
+          docker compose up --build --wait --wait-timeout 300 api scan-runner
       - name: Run the gate
         run: |
           set -u

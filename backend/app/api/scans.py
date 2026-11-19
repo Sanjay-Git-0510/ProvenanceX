@@ -2,7 +2,6 @@
 
 import logging
 import re
-from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -29,9 +28,7 @@ from app.db.models import (
     ScanStatus,
 )
 from app.graph.dependency_graph import ROOT_KEY
-from app.pipeline.model import run_model_ingestion
 from app.pipeline.providers import ScanProviders, build_providers
-from app.pipeline.software import run_software_ingestion
 from app.pipeline.workspace import MB, create_workspace, remove_workspace, write_stream_limited
 from app.risk.service import risk_for_scan
 from app.schemas.evidence import DEFAULT_PAGE, MAX_PAGE, EvidenceResponse, Page, Sanitized, sanitize
@@ -108,7 +105,6 @@ def _queue_scan(
     settings: Settings,
     session_factory: sessionmaker[Session],
     providers: ScanProviders,
-    runner: Callable[..., None],
     artifact_type: ArtifactType,
     name: str,
     source: ArtifactSource,
@@ -144,7 +140,16 @@ def _queue_scan(
         remove_workspace(workspace, settings.workspace_root)
         raise
 
-    background_tasks.add_task(runner, scan_id, session_factory, settings, providers)
+    if settings.scan_dispatch == "inline_test":
+        # Test suite only (Settings refuse it outside APP_ENV=test). Imported here so the API
+        # module never loads the pipeline in a deployment.
+        from app.runner.executor import run_inline_for_tests
+
+        background_tasks.add_task(
+            run_inline_for_tests, scan_id, session_factory, settings, providers
+        )
+    # Otherwise the scan stays QUEUED until the scan-runner claims it. The API never reads the
+    # artifact's content.
     logger.info("Scan %s queued (type=%s, source=%s)", scan_id, artifact_type, source)
     return ScanCreatedResponse(scan_id=scan_id, artifact_id=artifact_id, status=ScanStatus.QUEUED)
 
@@ -180,7 +185,6 @@ def create_software_scan(
         settings=settings,
         session_factory=session_factory,
         providers=providers,
-        runner=run_software_ingestion,
         artifact_type=ArtifactType.SOFTWARE,
         name=display_name,
         source=source,
@@ -244,7 +248,6 @@ def create_model_scan(
         settings=settings,
         session_factory=session_factory,
         providers=providers,
-        runner=run_model_ingestion,
         artifact_type=kind or ArtifactType.MODEL,
         name=display_name,
         source=source,

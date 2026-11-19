@@ -64,6 +64,51 @@ class ScanErrorOut(BaseModel):
     details: Any = None
 
 
+_RUN_FIELDS = (
+    "mode",
+    "provider",
+    "status",
+    "runtime_verified",
+    "exit_code",
+    "oom_killed",
+    "timed_out",
+    "duration_seconds",
+    "error_code",
+    "isolation",
+    "finished_at",
+)
+_RUNTIME_FIELDS = (
+    "image_id",
+    "network",
+    "read_only_rootfs",
+    "cap_drop",
+    "no_new_privileges",
+    "memory_mb",
+    "cpus",
+    "pids_limit",
+    "tmp_mb",
+    "timeout_seconds",
+)
+
+
+def sandbox_summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    """An allowlisted view of Scan.sandbox: isolation facts, never host paths or user ids."""
+    if not record:
+        return None
+    runs = []
+    for run in record.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        out = {k: run.get(k) for k in _RUN_FIELDS if k in run}
+        runtime = run.get("runtime")
+        if isinstance(runtime, dict):
+            out["runtime"] = {k: runtime.get(k) for k in _RUNTIME_FIELDS if k in runtime}
+        if "image" in run:
+            out["image"] = run["image"]
+        runs.append(out)
+    return {"provider": record.get("provider"), "runs": runs}
+
+
 class ScanResponse(BaseModel):
     scan_id: UUID
     status: ScanStatus
@@ -80,6 +125,8 @@ class ScanResponse(BaseModel):
     component_count: int = 0
     finding_count: int = 0
     provenance: ProvenanceOut | None = None
+    # Isolated analyzer runs that read this artifact (see app/pipeline/sandboxed.py).
+    sandbox: dict[str, Any] | None = None
     error: ScanErrorOut | None
 
     @classmethod
@@ -120,5 +167,6 @@ class ScanResponse(BaseModel):
             component_count=component_count,
             finding_count=finding_count,
             provenance=ProvenanceOut.from_row(scan.provenance) if scan.provenance else None,
+            sandbox=sandbox_summary(scan.sandbox),
             error=error,
         )

@@ -93,3 +93,8 @@ export function isAllowedSourceUrl(value, host) {
     return false;
   }
 }
+
+/** A completed scan with no stored decision or score has nothing to show on the dashboard. */
+export function isUncomputedCompleted(scan) {
+  return scan.status === "completed" && (!scan.decision || typeof scan.risk_score !== "number");
+}

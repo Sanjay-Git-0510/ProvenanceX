@@ -128,7 +128,16 @@ def api(tmp_path_factory):
         pytest.skip(f"Use scripts/run_e2e.sh. Not set: {', '.join(missing)}")
     workspace = tmp_path_factory.mktemp("e2e-workspaces")
     port = _free_port()
-    env = {**os.environ, "WORKSPACE_ROOT": str(workspace), "BLOCKCHAIN_PROVIDER": "web3"}
+    env = {
+        **os.environ,
+        "WORKSPACE_ROOT": str(workspace),
+        "BLOCKCHAIN_PROVIDER": "web3",
+        # The production path: the API only queues, and a scan runner on the host runs each
+        # content-reading step in the real analyzer sandbox (bind-mounted workspace).
+        "SCAN_DISPATCH": "runner",
+        "ANALYZER_PROVIDER": "docker",
+        "ANALYZER_WORKSPACE_MOUNT": "bind",
+    }
     process = subprocess.Popen(  # noqa: S603 - fixed interpreter and arguments
         [
             sys.executable,
@@ -143,6 +152,9 @@ def api(tmp_path_factory):
         cwd=BACKEND,
         env=env,
     )
+    runner = subprocess.Popen(  # noqa: S603 - fixed interpreter and arguments
+        [sys.executable, "-m", "app.runner"], cwd=BACKEND, env=env
+    )
     base_url = f"http://127.0.0.1:{port}/api/v1"
     try:
         deadline = time.monotonic() + 60
@@ -153,13 +165,16 @@ def api(tmp_path_factory):
             except httpx.HTTPError:
                 pass
             assert process.poll() is None, "the API exited during startup"
+            assert runner.poll() is None, "the scan runner exited during startup"
             time.sleep(0.5)
         else:
             pytest.fail("the API did not become ready")
         yield Api(base_url, workspace)
     finally:
-        process.terminate()
-        process.wait(timeout=20)
+        for proc in (runner, process):
+            proc.terminate()
+        for proc in (runner, process):
+            proc.wait(timeout=60)
 
 
 @pytest.mark.parametrize(

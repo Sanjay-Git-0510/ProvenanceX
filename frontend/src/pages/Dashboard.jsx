@@ -9,6 +9,7 @@ import LoadingState from "../components/ui/LoadingState.jsx";
 import Pagination from "../components/ui/Pagination.jsx";
 import Panel from "../components/ui/Panel.jsx";
 import useApi from "../hooks/useApi.js";
+import { isUncomputedCompleted } from "../lib/format.js";
 import { POLL_MS } from "../lib/polling.js";
 import { api } from "../services/api.js";
 
@@ -29,7 +30,7 @@ function RecentScans() {
   return (
     <>
       <RecentScansTable
-        scans={data.items ?? []}
+        scans={(data.items ?? []).filter((scan) => !isUncomputedCompleted(scan))}
         empty={
           <EmptyState
             title="No scans yet"
@@ -53,26 +54,27 @@ function RecentScans() {
 function LatestScanPanels() {
   const fetcher = useCallback((options) => api.listScans({ limit: SUMMARY_SIZE, ...options }), []);
   const { status, data, error, reload } = useApi(fetcher, { pollMs: POLL_MS });
-  const items = data?.items ?? [];
+  const all = data?.items ?? [];
+  const items = all.filter((scan) => !isUncomputedCompleted(scan));
   const body = (content) => {
     if (status === "error") return <ErrorState error={error} onRetry={reload} headingLevel={3} />;
     if (!data) return <LoadingState label="Loading" lines={2} />;
     return content;
   };
-  const total = data?.page?.total ?? items.length;
-  const eyebrow = !data ? "Scan decisions" : total === 0 ? "No scans" : total > items.length ? `Latest ${items.length} of ${total} scans` : `Latest ${items.length} scans`;
+  const decided = items.filter((scan) => Boolean(scan.decision));
+  const eyebrow = !data ? "Scan decisions" : decided.length === 0 ? "No scans" : `Latest ${decided.length} scans`;
   return (
     <>
       <Panel title="Decisions" eyebrow={eyebrow} className="span-4">
         {body(
-          items.length === 0 ? (
+          decided.length === 0 ? (
             <EmptyState
               title="No decisions yet"
               message="No scans recorded yet. Click 'Start scan' to analyze an artifact."
               headingLevel={3}
             />
           ) : (
-            <DecisionSummary scans={items} />
+            <DecisionSummary scans={decided} />
           ),
         )}
       </Panel>

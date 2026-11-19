@@ -43,7 +43,13 @@ osv_status=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -X POST \
 export POSTGRES_USER=provenancex POSTGRES_PASSWORD=provenancex-demo POSTGRES_DB=provenancex
 export BLOCKCHAIN_PROVIDER=web3 BLOCKCHAIN_ANCHOR_ON_SCAN=true
 export SBOM_PROVIDER=syft VULN_PROVIDER=osv NVD_ENABLED=false HF_PROVIDER=hf
+# Optional behavioral analysis stays off. Content analysis always runs in the analyzer sandbox.
 export SANDBOX_PROVIDER=disabled
+# The demo keeps its own workspace volume, separate from a development stack's.
+export ANALYZER_WORKSPACE_VOLUME="${PROJECT}_workspace"
+# The scan runner reaches Docker through the socket's group (it never runs as root).
+DOCKER_SOCKET_GID="${DOCKER_SOCKET_GID:-$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)}"
+export DOCKER_SOCKET_GID
 
 compose() {
   docker compose -p "$PROJECT" --project-directory "$REPO" \
@@ -76,8 +82,11 @@ contract=$(sed -n 's/.*"contract_address":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' <<<"
 }
 export BLOCKCHAIN_CONTRACT_ADDRESS="$contract"
 
-echo "Building and starting the API and the UI"
-compose up --build --wait --wait-timeout 600 api frontend
+echo "Building the analyzer sandbox image"
+compose --profile analyzer-image build analyzer-image
+
+echo "Building and starting the API, the scan runner and the UI"
+compose up --build --wait --wait-timeout 600 api scan-runner frontend
 
 echo "Seeding the demo with benign fixtures"
 python3 "$REPO/scripts/seed_demo.py" --api-url "http://127.0.0.1:$API_PORT/api/v1"

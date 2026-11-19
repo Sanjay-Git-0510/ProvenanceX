@@ -122,6 +122,11 @@ def test_settings(tmp_path) -> Settings:
         vuln_provider="mock",
         nvd_enabled=False,
         hf_provider="mock",
+        # Sandbox-only scanning: the suite runs the analyzer worker in-process (refused outside
+        # pytest + APP_ENV=test) and the API runs scans inline instead of via the scan-runner.
+        app_env="test",
+        analyzer_provider="inprocess_test",
+        scan_dispatch="inline_test",
     )
 
 
@@ -144,6 +149,19 @@ def scan_client(test_settings, session_factory, public_dns) -> TestClient:
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_session_factory] = lambda: session_factory
     return TestClient(app, raise_server_exceptions=False)
+
+
+def attach_test_analyzer(providers, settings):
+    """Give hand-built ScanProviders the pytest-only in-process analyzer.
+
+    Without an analyzer a scan fails closed with sandbox_unavailable (see
+    tests/security/test_no_host_fallback.py). Custom SBOM providers are injected into the
+    analyzer, because SBOM generation runs inside it.
+    """
+    from app.analysis.inprocess import InProcessTestAnalyzer
+
+    providers.analyzer = InProcessTestAnalyzer(settings, sbom_provider=providers.sbom)
+    return providers
 
 
 # --------------------------------------------------------------------------- ZIP helpers

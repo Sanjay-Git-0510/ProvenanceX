@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -98,6 +98,57 @@ class Settings(BaseSettings):
     sandbox_spike_cpu_min_intervals: int = Field(default=3, gt=0)
     model_path: Path = Path("./ml/models")
 
+    # --- Content analysis (master prompt Phase 1). Every step that reads untrusted artifact
+    # content (extraction, tree hashing, manifests, Syft, AI-BOM, pickle/safetensors parsing,
+    # static analysis) runs in a disposable analyzer container. There is no "disabled" value
+    # and no host fallback: without a working analyzer the scan fails with
+    # sandbox_unavailable. "inprocess_test" runs the same worker code in-process and is
+    # refused unless APP_ENV=test inside a pytest run.
+    analyzer_provider: Literal["docker", "inprocess_test"] = "docker"
+    analyzer_docker_path: str = "docker"
+    analyzer_image: str = "provenancex-analyzer:0.1.0"
+    analyzer_timeout_seconds: int = Field(default=600, gt=0)
+    analyzer_extract_timeout_seconds: int = Field(default=300, gt=0)
+    analyzer_host_grace_seconds: int = Field(default=15, gt=0)
+    # tmpfs pages count toward the memory limit, so keep this well above the tmpfs sizes.
+    analyzer_memory_mb: int = Field(default=1536, gt=0)
+    analyzer_cpus: float = Field(default=1.0, gt=0)
+    analyzer_pids_limit: int = Field(default=128, gt=0)
+    analyzer_tmp_mb: int = Field(default=256, gt=0)
+    analyzer_max_output_mb: int = Field(default=96, gt=0)
+    analyzer_max_stderr_kb: int = Field(default=256, gt=0)
+    # How the per-scan workspace reaches the analyzer: "bind" (the runner runs on the host,
+    # WORKSPACE_ROOT is a host path) or "volume" (the runner runs in Compose and the
+    # workspace is the named volume ANALYZER_WORKSPACE_VOLUME, mounted with volume-subpath).
+    analyzer_workspace_mount: Literal["bind", "volume"] = "bind"
+    analyzer_workspace_volume: str = "provenancex_workspace"
+    # Label value that scopes orphan cleanup to this deployment. Analyzer containers are
+    # labelled with it, and the runner only ever removes containers carrying its own value,
+    # so another Compose project on the same daemon is never touched. Empty: the volume name.
+    analyzer_instance: str = Field(default="", max_length=63, pattern=r"^[A-Za-z0-9_.-]*$")
+    # Extra CPU seconds above cpus x timeout before RLIMIT_CPU stops the worker.
+    analyzer_cpu_grace_seconds: int = Field(default=30, ge=0)
+
+    # --- Scan dispatch. "runner": the API only queues; the scan-runner service claims and
+    # runs scans. "inline_test" runs the pipeline in an API background task and is refused
+    # outside APP_ENV=test.
+    scan_dispatch: Literal["runner", "inline_test"] = "runner"
+    runner_poll_seconds: float = Field(default=2.0, gt=0)
+    # Ownership of a running scan (app/pipeline/ownership.py). The owning runner renews the
+    # heartbeat every RUNNER_HEARTBEAT_SECONDS; a RUNNING scan with no heartbeat for
+    # RUNNER_STALE_SECONDS is failed as runner_interrupted and its claim token replaced, so the
+    # old runner can no longer write to it. A scan claimed more than RUNNER_MAX_SCAN_SECONDS ago
+    # is failed even if its heartbeat is fresh (a hung pipeline). Compose sets the runner's
+    # stop_grace_period from RUNNER_MAX_SCAN_SECONDS.
+    runner_heartbeat_seconds: float = Field(default=10.0, gt=0)
+    runner_stale_seconds: int = Field(default=120, gt=0)
+    runner_max_scan_seconds: int = Field(default=1800, gt=0)
+    # How often an idle runner recovers stale claims and removes orphaned analyzer containers.
+    runner_reconcile_seconds: float = Field(default=30.0, gt=0)
+    # Identity recorded on claims. Must be unique per runner replica; empty: the hostname
+    # (in Compose, the container id, which survives a restart of the same container).
+    runner_id: str = Field(default="", max_length=128)
+
     # --- Blockchain (Phase 7). "disabled" is the default. "mock" is an in-memory ledger tagged
     # source="mock", and is never a fallback. "web3" accepts only a local chain.
     blockchain_provider: Literal["disabled", "web3", "mock"] = "disabled"
@@ -116,6 +167,40 @@ class Settings(BaseSettings):
         if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError(f"invalid log level: {value}")
         return value
+
+    @property
+    def analyzer_instance_label(self) -> str:
+        return self.analyzer_instance or self.analyzer_workspace_volume
+
+    @model_validator(mode="after")
+    def _runner_timing(self) -> "Settings":
+        # Three missed heartbeats before a claim can be declared stale, so a slow database
+        # round trip never fails a healthy scan.
+        if self.runner_stale_seconds < 3 * self.runner_heartbeat_seconds:
+            raise ValueError("RUNNER_STALE_SECONDS must be at least 3 x RUNNER_HEARTBEAT_SECONDS")
+        # A legitimate scan with both analyzer runs at their limits must fit in the ceiling.
+        analyzer_budget = (
+            self.analyzer_extract_timeout_seconds
+            + self.analyzer_timeout_seconds
+            + 2 * self.analyzer_host_grace_seconds
+        )
+        if self.runner_max_scan_seconds < analyzer_budget:
+            raise ValueError(
+                "RUNNER_MAX_SCAN_SECONDS must cover both analyzer time limits plus their grace "
+                f"({analyzer_budget}s)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _test_only_modes(self) -> "Settings":
+        if self.app_env != "test":
+            if self.analyzer_provider == "inprocess_test":
+                raise ValueError(
+                    "ANALYZER_PROVIDER=inprocess_test is allowed only with APP_ENV=test"
+                )
+            if self.scan_dispatch == "inline_test":
+                raise ValueError("SCAN_DISPATCH=inline_test is allowed only with APP_ENV=test")
+        return self
 
     @field_validator("cors_origins", mode="before")
     @classmethod

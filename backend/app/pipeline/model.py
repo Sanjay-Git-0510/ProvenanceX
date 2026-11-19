@@ -2,9 +2,10 @@
 
 Implements CLAUDE.md pipeline steps for AI artifacts:
   1. receive input / scan_id   (the API creates the Scan row and workspace)
-  2. safe working directory    (ZIP extraction, or a capped Hugging Face download)
-  3. SHA-256                   (provenancex-tree-v1 over local content; for HF also a
-                                manifest digest over the full remote listing)
+  2. safe working directory    (ZIP extraction in the analyzer sandbox, or a capped Hugging
+                                Face download)
+  3. SHA-256                   (provenancex-tree-v1 over local content, computed in the
+                                analyzer; for HF also a manifest digest over the full listing)
   5. AI-BOM / lineage record   (inventory, formats, configs, card, adapters)  [aibom_stage]
   6. lineage graph             (NetworkX -> GraphNode/GraphEdge rows)          [lineage_stage]
   7. OSV lookup                (exactly pinned runtime requirements only)      [vuln_stage]
@@ -13,8 +14,12 @@ Implements CLAUDE.md pipeline steps for AI artifacts:
  10. sandbox (optional)        (behavior features + behavioral Findings)       [sandbox_stage]
  11-18. risk                   (features, models, fusion, policy, SHAP, RiskDecision) [risk_stage]
 
-Nothing from the artifact is executed, imported or deserialized. The lifecycle (failure
-handling, workspace cleanup) is shared with the software pipeline (lifecycle.py).
+Nothing from the artifact is executed, imported or deserialized, and nothing is read on the
+host: every content-reading step (extraction, inventory, pickle/safetensors parsing, configs,
+model card, static analysis) runs in the analyzer container (app/pipeline/sandboxed.py). The
+stages here store its validated output. Without a working analyzer the scan fails. The
+lifecycle (failure handling, workspace cleanup) is shared with the software pipeline
+(lifecycle.py).
 """
 
 import hashlib
@@ -27,26 +32,30 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.analysis.base import AnalysisJob, ContentAnalyzer
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
-from app.core.hashing import TREE_DIGEST_VERSION, sha256_file, tree_digest
+from app.core.hashing import TREE_DIGEST_VERSION, sha256_file
 from app.db.models import ArtifactSource, Scan, utcnow
-from app.pipeline.aibom_stage import AiBomStageOutput, run_aibom_stage
+from app.pipeline.aibom_stage import run_aibom_stage
 from app.pipeline.anchor_stage import run_anchor_stage
 from app.pipeline.lifecycle import run_scan
 from app.pipeline.lineage_stage import run_lineage_stage
+from app.pipeline.ownership import ScanClaim
 from app.pipeline.provenance_stage import ProvenanceExtras, run_provenance_stage
-from app.pipeline.providers import ScanProviders, build_providers
-from app.pipeline.risk_stage import run_risk_stage
+from app.pipeline.providers import ScanProviders, build_providers, require_analyzer
+from app.pipeline.risk_stage import CollectedRiskInputs, run_risk_stage
 from app.pipeline.sandbox_stage import run_sandbox_stage
+from app.pipeline.sandboxed import analyze_tree, extract_upload
+from app.pipeline.software import check_tree
 from app.pipeline.stages import skip_stage
 from app.pipeline.static_stage import StaticExtras, run_static_stage
 from app.pipeline.vuln_stage import run_vuln_stage
 from app.pipeline.workspace import MB, Workspace
+from app.sandbox_worker.protocol import AnalysisOut
 from app.scanners.hf.base import HfFetchLimits, HfFetchResult
 from app.scanners.model.aibom import ModelContext
 from app.scanners.model.inventory import RemoteOnlyFile
-from app.security.archive import ArchiveLimits, safe_extract_zip
 from app.security.url_validation import validate_hf_repo_url
 
 logger = logging.getLogger(__name__)
@@ -60,6 +69,7 @@ class ModelIngest:
     ctx: ModelContext
     hf: HfFetchResult | None
     file_paths: list[str]
+    collected: AnalysisOut
     manifest_sha256: str | None = None
 
 
@@ -110,46 +120,63 @@ def _fetch_hf(
     return result
 
 
+def _context_payload(ctx: ModelContext) -> dict[str, Any]:
+    """The ModelContext as the analyzer request carries it (JSON only)."""
+    return {
+        "name": ctx.name,
+        "artifact_type": ctx.artifact_type,
+        "source": ctx.source,
+        "source_url": ctx.source_url,
+        "repo_id": ctx.repo_id,
+        "commit_sha": ctx.commit_sha,
+        "remote_only": [
+            {
+                "path": r.path,
+                "size": r.size,
+                "remote_sha256": r.remote_sha256,
+                "skip_reason": r.skip_reason,
+            }
+            for r in ctx.remote_only
+        ],
+        "remote_hashes": ctx.remote_hashes,
+        "api_card_data": ctx.api_card_data,
+        "api_meta": ctx.api_meta,
+    }
+
+
 def _ingest(
     session: Session,
     scan: Scan,
     workspace: Workspace,
     settings: Settings,
     providers: ScanProviders,
+    analyzer: ContentAnalyzer,
 ) -> ModelIngest:
     artifact = scan.artifact
-    max_bytes = settings.max_artifact_size_mb * MB
     archive_sha256: str | None = None
     hf: HfFetchResult | None = None
+    has_upload = artifact.source == ArtifactSource.UPLOAD
 
-    if artifact.source == ArtifactSource.UPLOAD:
+    def job(model_context: dict[str, Any] | None = None) -> AnalysisJob:
+        return AnalysisJob(
+            scan_id=scan.id,
+            workspace=workspace,
+            kind="model",
+            has_upload=has_upload,
+            revision_requested=scan.revision_requested,
+            model_context=model_context,
+        )
+
+    if has_upload:
         if not workspace.upload_path.is_file():
             raise AppError(ErrorCode.WORKSPACE_ERROR, "Uploaded archive is missing", 500)
+        # Hashing the raw bytes reads nothing as structure; extraction happens in the sandbox.
         archive_sha256 = sha256_file(workspace.upload_path)
-        safe_extract_zip(
-            workspace.upload_path,
-            workspace.src_dir,
-            ArchiveLimits(
-                max_total_bytes=max_bytes,
-                max_files=settings.max_artifact_files,
-                max_compression_ratio=settings.max_compression_ratio,
-            ),
-        )
+        extract_upload(session, scan, analyzer, job())
     elif artifact.source == ArtifactSource.HUGGINGFACE:
         hf = _fetch_hf(scan, workspace, settings, providers)
     else:
         raise AppError(ErrorCode.INVALID_INPUT, "Unsupported source for a model scan", 400)
-
-    tree = tree_digest(workspace.src_dir, max_files=settings.max_artifact_files)
-    if tree.file_count == 0 and not (hf and hf.files):
-        raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
-    if tree.total_bytes > max_bytes:
-        raise AppError(
-            ErrorCode.ARTIFACT_TOO_LARGE,
-            "Artifact exceeds the size limit",
-            413,
-            {"max_bytes": max_bytes},
-        )
 
     remote_only: list[RemoteOnlyFile] = []
     remote_hashes: dict[str, str | None] = {}
@@ -174,6 +201,23 @@ def _ingest(
         }
 
     commit_sha = hf.commit_sha if hf else None
+    ctx = ModelContext(
+        name=artifact.name,
+        artifact_type=str(artifact.artifact_type),
+        source=str(artifact.source),
+        source_url=artifact.source_url,
+        repo_id=hf.repo.repo_id if hf else None,
+        commit_sha=commit_sha,
+        remote_only=remote_only,
+        remote_hashes=remote_hashes,
+        api_card_data=hf.card_data if hf else None,
+        api_meta=hf.meta if hf else {},
+    )
+    collected = analyze_tree(session, scan, analyzer, job(_context_payload(ctx)))
+    if collected.tree.file_count == 0 and not (hf and hf.files):
+        raise AppError(ErrorCode.EMPTY_ARTIFACT, "Artifact contains no files", 400)
+    tree = check_tree(collected, settings)
+
     artifact.sha256 = tree.sha256
     artifact.collected_at = utcnow()
     if artifact.version is None and commit_sha:
@@ -194,21 +238,12 @@ def _ingest(
         "Model scan %s ingested: %s local files, sha256=%s", scan.id, tree.file_count, tree.sha256
     )
 
-    ctx = ModelContext(
-        name=artifact.name,
-        artifact_type=str(artifact.artifact_type),
-        source=str(artifact.source),
-        source_url=artifact.source_url,
-        repo_id=hf.repo.repo_id if hf else None,
-        commit_sha=commit_sha,
-        remote_only=remote_only,
-        remote_hashes=remote_hashes,
-        api_card_data=hf.card_data if hf else None,
-        api_meta=hf.meta if hf else {},
-    )
-    paths = [f.path for f in hf.files] if hf else []
+    # Provenance compares against the full Hub listing when there is one, else the local tree.
+    paths = [f.path for f in hf.files] if hf else list(collected.file_paths)
     manifest = hf_meta["manifest_sha256"] if hf_meta else None
-    return ModelIngest(ctx=ctx, hf=hf, file_paths=paths, manifest_sha256=manifest)
+    return ModelIngest(
+        ctx=ctx, hf=hf, file_paths=paths, collected=collected, manifest_sha256=manifest
+    )
 
 
 def _run_evidence_stages(
@@ -221,7 +256,8 @@ def _run_evidence_stages(
 ) -> None:
     """Steps 5-18. Each stage records its own status and never raises."""
     input_source = ingested.hf.source if ingested.hf else "upload"
-    aibom = run_aibom_stage(session, scan_id, workspace, settings, ingested.ctx, input_source)
+    collected = ingested.collected
+    aibom = run_aibom_stage(session, scan_id, workspace, collected, ingested.ctx, input_source)
     lineage: dict[str, Any] | None = None
     if aibom is None:
         skip_stage(session, scan_id, "graph", "aibom stage did not succeed")
@@ -259,37 +295,9 @@ def _run_evidence_stages(
         ),
         settings.max_artifact_files,
     )
-    run_static_stage(
-        session,
-        scan_id,
-        workspace,
-        settings,
-        _static_extras(input_source, aibom, hf),
-    )
+    run_static_stage(session, scan_id, collected, StaticExtras(input_source=input_source))
     run_sandbox_stage(session, scan_id, workspace, settings, providers.sandbox, "model")
-    run_risk_stage(session, scan_id, workspace, settings)
-
-
-def _static_extras(
-    input_source: str, aibom: AiBomStageOutput | None, hf: HfFetchResult | None
-) -> StaticExtras:
-    """Pickle and auto_map evidence comes from the AI-BOM, so no finding is duplicated."""
-    pickle_dangerous: int | None = None
-    auto_map_targets = 0
-    if aibom is not None:
-        analysis = aibom.analysis
-        pickle_dangerous = sum(
-            len(f.analysis["pickle"]["dangerous_globals"])
-            for f in analysis.inventory
-            if f.analysis.get("pickle") is not None
-        )
-        auto_map_targets = sum(len(m) for m in analysis.custom_code.auto_map.values())
-    return StaticExtras(
-        input_source=input_source,
-        auto_map_targets=auto_map_targets,
-        pickle_dangerous_globals=pickle_dangerous,
-        undownloaded_files=sum(1 for f in hf.files if not f.downloaded) if hf else 0,
-    )
+    run_risk_stage(session, scan_id, settings, CollectedRiskInputs.from_analysis(collected))
 
 
 def run_model_ingestion(
@@ -297,12 +305,13 @@ def run_model_ingestion(
     session_factory: sessionmaker[Session],
     settings: Settings,
     providers: ScanProviders | None = None,
+    claim: ScanClaim | None = None,
 ) -> None:
     """Background entry point: ingest and analyze the AI artifact of `scan_id`. Never raises."""
     resolved = providers or build_providers(settings)
 
     def ingest(session: Session, scan: Scan, workspace: Workspace) -> ModelIngest:
-        return _ingest(session, scan, workspace, settings, resolved)
+        return _ingest(session, scan, workspace, settings, resolved, require_analyzer(resolved))
 
     def evidence(session: Session, sid: UUID, workspace: Workspace, ingested: ModelIngest) -> None:
         _run_evidence_stages(session, sid, workspace, settings, resolved, ingested)
@@ -310,4 +319,13 @@ def run_model_ingestion(
     def anchor(session: Session, sid: UUID) -> None:
         run_anchor_stage(session, sid, settings, resolved.chain)
 
-    run_scan(scan_id, session_factory, settings, ingest, evidence, anchor)
+    run_scan(
+        scan_id,
+        session_factory,
+        settings,
+        ingest,
+        evidence,
+        anchor,
+        require_decision=True,
+        claim=claim,
+    )

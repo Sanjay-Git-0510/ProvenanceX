@@ -25,13 +25,16 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.analysis.base import section_to_error
+from app.analysis.codec import model_analysis_from_aibom
+from app.core.errors import AppError, ErrorCode
 from app.db.models import Component, Finding, FindingCategory, Scan
 from app.graph.lineage_graph import package_key
 from app.pipeline.sbom_stage import SbomStageOutput
 from app.pipeline.stages import StageStatus, execute_stage
 from app.pipeline.workspace import Workspace
-from app.scanners.model.aibom import ModelAnalysis, ModelContext, analyze_model
+from app.sandbox_worker.protocol import AnalysisOut
+from app.scanners.model.aibom import ModelAnalysis, ModelContext
 from app.scanners.model.inventory import InventoryFile
 from app.scanners.sbom.cyclonedx import ParsedComponent, ParsedSbom
 
@@ -300,20 +303,31 @@ def _components(
     return ids, parsed
 
 
+def _collected_analysis(collected: AnalysisOut) -> ModelAnalysis:
+    if collected.aibom_error is not None:
+        raise section_to_error(collected.aibom_error)
+    if collected.aibom is None:
+        raise AppError(ErrorCode.ANALYZER_OUTPUT_INVALID, "The analyzer returned no AI-BOM", 502)
+    return model_analysis_from_aibom(collected.aibom)
+
+
 def run_aibom_stage(
     session: Session,
     scan_id: UUID,
     workspace: Workspace,
-    settings: Settings,
+    collected: AnalysisOut,
     ctx: ModelContext,
     input_source: str,
 ) -> AiBomStageOutput | None:
-    """`input_source` is "mock" when the files came from the mock HF provider."""
+    """`input_source` is "mock" when the files came from the mock HF provider.
+
+    The AI-BOM was built inside the analyzer sandbox; this stage validates and stores it.
+    """
     source = "mock" if input_source == "mock" else "aibom"
     finding_source = "mock" if input_source == "mock" else "provenancex"
 
     def body(scan: Scan) -> tuple[AiBomStageOutput, StageStatus, dict[str, Any]]:
-        analysis = analyze_model(workspace.src_dir, ctx, settings)
+        analysis = _collected_analysis(collected)
         raw = json.dumps(analysis.aibom, sort_keys=True, indent=2).encode()
         _write_private(workspace.root / AIBOM_FILENAME, raw)
         scan.bom_sha256 = bom_sha256 = hashlib.sha256(raw).hexdigest()

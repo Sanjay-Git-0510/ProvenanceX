@@ -20,9 +20,21 @@ ALLOW / REVIEW / BLOCK decision, and anchors compact evidence on a local blockch
                              └─────────────────────────────┘          └──────────┘
 ```
 
+Since 2026-11-18 (sandbox-only scanning, [docs/security/sandbox.md](security/sandbox.md)), the
+API only queues scans. A separate `scan-runner` process claims them and runs the pipeline. Every
+step that reads artifact content runs in a per-scan analyzer container
+(`app/sandbox_worker`, `docker/analyzer`). Only the runner holds the Docker socket.
+
+```
+API (queue) -> Postgres -> scan-runner -> analyzer container (no network, read-only, non-root)
+                                       <- validated JSON only
+```
+
 | Component | Tech | Responsibility |
 |---|---|---|
-| API | FastAPI + Pydantic | Input validation, scan endpoints, structured errors |
+| API | FastAPI + Pydantic | Input validation, scan endpoints, structured errors. Queues scans; never reads artifact content |
+| Scan runner | `app/runner` | Claims queued scans, runs the pipeline, launches and verifies analyzer containers (only holder of the Docker socket) |
+| Analyzer sandbox | `app/sandbox_worker`, `app/analysis` | Extraction, hashing, Syft, AI-BOM, pickle/safetensors parsing, static analysis, in a disposable container; output size-capped and schema-validated |
 | Pipeline | Python module | Runs the 22 steps in CLAUDE.md's fixed order |
 | Security | `app/security` | URL allowlist, SSRF checks, archive validation, size/count limits |
 | Scanners | `app/scanners` | SBOM (Syft/CycloneDX), AI-BOM, OSV/NVD, provenance, static, sandbox |
@@ -53,13 +65,17 @@ CVSS, the ML probability, the anomaly score and the ProvenanceX risk score stay 
    - URLs: https only, allowlist limited to `github.com` and `huggingface.co`, and private, loopback and link-local IPs are rejected after DNS resolution.
    - Git clones: shallow, no submodules, hooks disabled, with size and time limits.
    - Archives: path traversal, absolute paths, symlinks and decompression bombs are rejected, and `MAX_ARTIFACT_SIZE_MB` and `MAX_ARTIFACT_FILES` are enforced.
-3. **Sandbox boundary:** dynamic analysis runs only in a disposable Docker container with these restrictions:
+3. **Analyzer boundary (content analysis):** every step that reads artifact content runs in a disposable analyzer
+   container: `--network=none`, read-only root, non-root, `cap-drop ALL`, `no-new-privileges`, memory/CPU/pids
+   limits, a noexec tmpfs and a hard timeout. Its configuration is verified with `docker inspect` before it starts,
+   and by a self-check inside it. There is no host fallback (see [docs/security/sandbox.md](security/sandbox.md)).
+4. **Sandbox boundary (behavioral, optional):** dynamic analysis runs only in a disposable Docker container with these restrictions:
    - no network by default, and a read-only artifact mount
    - non-root user, `cap_drop: ALL` and `no-new-privileges`
    - pids, memory and CPU limits, plus a hard timeout
    - no Docker socket mount
-4. **Chain boundary:** only these fields go on-chain: `artifact_id, artifact_hash, bom_hash, provenance_hash, risk_score, decision, scanner_version, timestamp`. Everything else stays off-chain.
-5. **Secrets:** environment variables only. `.env.example` holds placeholders, and the chain key is a local Hardhat dev key.
+5. **Chain boundary:** only these fields go on-chain: `artifact_id, artifact_hash, bom_hash, provenance_hash, risk_score, decision, scanner_version, timestamp`. Everything else stays off-chain.
+6. **Secrets:** environment variables only. `.env.example` holds placeholders, and the chain key is a local Hardhat dev key.
 
 ## 4. Adapters and mocks
 

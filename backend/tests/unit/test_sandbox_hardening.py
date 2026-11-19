@@ -169,14 +169,20 @@ def test_root_owned_workspace_is_refused(tmp_path):
 # ------------------------------------------------------------------ compose and image
 def test_compose_api_has_no_docker_socket():
     compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
-    assert "docker.sock" not in (REPO / "docker-compose.yml").read_text()
+    # Sandbox-only scanning (owner-approved, 2026-11-18): the scan-runner service is the one
+    # place the socket may appear. Every other service, the API above all, must not see it.
+    for name, service in compose["services"].items():
+        if name != "scan-runner":
+            assert "docker.sock" not in yaml.safe_dump(service), name
     # Exactly two mounts are allowed: the trusted model directory, read-only, and the named
-    # workspace volume that verification reads. The volume must stay plain and named.
+    # workspace volume that verification reads. The volume must stay plain and named: only an
+    # explicit name (analyzer containers mount it by name), never a host path or driver options.
     assert compose["services"]["api"]["volumes"] == [
         "./ml/models:/app/ml/models:ro",
         "workspace:/app/workspace",
     ]
-    assert compose["volumes"]["workspace"] is None
+    workspace = compose["volumes"]["workspace"]
+    assert workspace is None or (set(workspace) == {"name"} and "/" not in str(workspace["name"]))
     api = compose["services"]["api"]
     assert not {"tmpfs", "volumes_from", "devices", "privileged", "cap_add"} & set(api)
     assert not [key for key in ("network_mode", "pid", "ipc") if api.get(key) == "host"]
@@ -239,7 +245,8 @@ def test_only_the_api_mounts_the_workspace_volume():
         for name, service in services.items()
         if any("workspace:" in str(volume) for volume in service.get("volumes", []))
     ]
-    assert users == ["api"]
+    # The API stores uploads; the scan-runner hands each scan's subdirectory to its analyzer.
+    assert users == ["api", "scan-runner"]
 
 
 def test_api_mount_check_rejects_a_workspace_volume_with_a_host_path(tmp_path, monkeypatch):

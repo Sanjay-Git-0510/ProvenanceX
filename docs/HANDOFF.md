@@ -2,7 +2,18 @@
 
 ## STATUS
 
-_Last updated: 2026-11-09_
+_Last updated: 2026-11-18_
+
+- **Master-prompt rework (2026-11-18), Phase 1 Milestone A (sandbox-only content analysis): done, awaiting
+  owner review.** Milestones B (fetch container + egress proxy) and C (expanded live tests, docs) are not started.
+  - The API only queues (`SCAN_DISPATCH=runner`). The new `scan-runner` service (`app/runner`) claims scans and is the
+    only holder of the Docker socket. Every content-reading step runs in a per-scan analyzer container
+    (`app/sandbox_worker`, `app/analysis`, `docker/analyzer`). Its config is verified with `docker inspect` and an
+    in-container self-check. Output is size-capped and schema-validated. There is no host fallback.
+  - Migration `0007`: `scans.sandbox` (run records) and `scans.claimed_at`.
+  - Test-only `ANALYZER_PROVIDER=inprocess_test` / `SCAN_DISPATCH=inline_test` are rejected unless `APP_ENV=test`.
+  - Not yet sandboxed: downloads (Milestone B), the `/verify` re-hash in the API, and the behavioral sandbox in Compose.
+    See [docs/security/sandbox.md](security/sandbox.md).
 
 - **Phase 0 (foundation): complete.**
 - **Phase 1 (software ingestion, SHA-256, URL/upload validation, safe workspace): complete.**

@@ -14,7 +14,7 @@ from app.scanners.sbom.cyclonedx import parse_cyclonedx
 from app.scanners.sbom.syft import SyftProvider
 from app.scanners.vulns.mock import MockVulnProvider
 from tests.api.test_scans_findings_graph import _client, _run_scan
-from tests.conftest import FIXTURES, SIMPLE_PROJECT
+from tests.conftest import FIXTURES, SIMPLE_PROJECT, attach_test_analyzer
 
 pytestmark = pytest.mark.skipif(
     shutil.which(get_settings().syft_path) is None, reason="Syft is not installed (SYFT_PATH)"
@@ -69,6 +69,7 @@ def test_api_scan_with_real_syft(test_settings, session_factory, public_dns):
         vulns=MockVulnProvider(),
         nvd=None,
     )
+    attach_test_analyzer(providers, settings)
     client = _client(settings, session_factory, providers)
     body = _run_scan(client)
     sbom = body["stages"]["sbom"]

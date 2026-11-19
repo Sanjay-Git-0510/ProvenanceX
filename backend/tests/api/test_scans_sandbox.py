@@ -16,7 +16,7 @@ from app.scanners.sandbox.base import SandboxRun
 from app.scanners.sandbox.mock import MOCK_TRACE_PATH, MockSandboxProvider
 from app.scanners.sbom.mock import MockSbomProvider
 from app.scanners.vulns.mock import MockVulnProvider
-from tests.conftest import FIXTURES, build_zip
+from tests.conftest import FIXTURES, attach_test_analyzer, build_zip
 
 SOFTWARE = "/api/v1/scans/software"
 MODEL = "/api/v1/scans/model"
@@ -42,6 +42,7 @@ def client_for(settings, factory, sandbox) -> TestClient:
         hf=MockHfProvider(),
         sandbox=sandbox,
     )
+    attach_test_analyzer(providers, settings)
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_session_factory] = lambda: factory

@@ -1,16 +1,26 @@
 # Thin wrappers around common commands. Run from the repo root.
 PY := backend/.venv/bin
+# Group that owns the Docker socket, given to the Compose scan-runner (docker-compose.yml).
+export DOCKER_SOCKET_GID ?= $(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)
 
-.PHONY: up down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
+.PHONY: up analyzer-image runner down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
 
-up:
+up: analyzer-image
 	docker compose up --build -d
+
+# Every content-reading scan step runs in a container from this image (docs/security/sandbox.md).
+analyzer-image:
+	docker compose --profile analyzer-image build analyzer-image
 
 down:
 	docker compose down
 
 logs:
 	docker compose logs -f
+
+# Run the scan runner on the host instead of in Compose (bind-mounted workspace).
+runner:
+	cd backend && ANALYZER_WORKSPACE_MOUNT=bind .venv/bin/python -m app.runner
 
 migrate:
 	docker compose exec api alembic upgrade head

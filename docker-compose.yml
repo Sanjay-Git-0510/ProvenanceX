@@ -23,6 +23,15 @@ services:
     image: provenancex-sandbox:0.1.0
     profiles: ["sandbox-image"]
 
+  # Build-only service: docker compose --profile analyzer-image build analyzer-image
+  # Every step that reads untrusted artifact content runs in a container from this image.
+  analyzer-image:
+    build:
+      context: ./backend
+      dockerfile: ../docker/analyzer/Dockerfile
+    image: provenancex-analyzer:0.1.0
+    profiles: ["analyzer-image"]
+
   # Local chain only, bound to loopback. It runs in memory, so a restart erases every anchor.
   hardhat:
     build: ./contracts
@@ -55,9 +64,13 @@ services:
       hardhat:
         condition: service_healthy
 
+  # Queues scans and serves results. It has no Docker socket and no Docker CLI, and it never
+  # reads artifact content (that happens only in analyzer containers launched by scan-runner).
   api:
-    build: ./backend
-    environment:
+    build:
+      context: ./backend
+      target: api
+    environment: &backend-env
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-provenancex}:${POSTGRES_PASSWORD:-provenancex}@postgres:5432/${POSTGRES_DB:-provenancex}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SCANNER_VERSION: ${SCANNER_VERSION:-0.1.0}
@@ -83,8 +96,8 @@ services:
       STATIC_MAX_TOTAL_MB: ${STATIC_MAX_TOTAL_MB:-64}
       STATIC_MAX_FINDINGS: ${STATIC_MAX_FINDINGS:-500}
       STATIC_ARCHIVE_RATIO_WARN_FRACTION: ${STATIC_ARCHIVE_RATIO_WARN_FRACTION:-0.8}
-      # The API container has no Docker socket and never will: "docker" reports "unavailable"
-      # here. Real sandbox runs need the API on the host (see README).
+      # Optional behavioral (dynamic) analysis. It is separate from the mandatory analyzer
+      # sandbox below and stays off until it supports the named workspace volume.
       SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-disabled}
       APP_ENV: ${APP_ENV:-development}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
@@ -128,6 +141,39 @@ services:
       BLOCKCHAIN_RPC_URL: http://hardhat:8545
       BLOCKCHAIN_CONTRACT_ADDRESS: ${BLOCKCHAIN_CONTRACT_ADDRESS:-}
       BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:-}
+      # Sandbox-only content analysis (docs/security/sandbox.md). There is no disabled mode:
+      # without Docker and the analyzer image, scans fail with sandbox_unavailable.
+      ANALYZER_PROVIDER: docker
+      ANALYZER_DOCKER_PATH: ${ANALYZER_DOCKER_PATH:-docker}
+      ANALYZER_IMAGE: ${ANALYZER_IMAGE:-provenancex-analyzer:0.1.0}
+      ANALYZER_TIMEOUT_SECONDS: ${ANALYZER_TIMEOUT_SECONDS:-600}
+      ANALYZER_EXTRACT_TIMEOUT_SECONDS: ${ANALYZER_EXTRACT_TIMEOUT_SECONDS:-300}
+      ANALYZER_HOST_GRACE_SECONDS: ${ANALYZER_HOST_GRACE_SECONDS:-15}
+      ANALYZER_MEMORY_MB: ${ANALYZER_MEMORY_MB:-1536}
+      ANALYZER_CPUS: ${ANALYZER_CPUS:-1.0}
+      ANALYZER_PIDS_LIMIT: ${ANALYZER_PIDS_LIMIT:-128}
+      ANALYZER_TMP_MB: ${ANALYZER_TMP_MB:-256}
+      ANALYZER_MAX_OUTPUT_MB: ${ANALYZER_MAX_OUTPUT_MB:-96}
+      ANALYZER_MAX_STDERR_KB: ${ANALYZER_MAX_STDERR_KB:-256}
+      # Inside Compose the workspace is the named volume below, mounted into analyzer
+      # containers with volume-subpath=<scan_id>/src.
+      ANALYZER_WORKSPACE_MOUNT: volume
+      ANALYZER_WORKSPACE_VOLUME: ${ANALYZER_WORKSPACE_VOLUME:-provenancex_workspace}
+      # The API only queues; the scan-runner service runs scans.
+      SCAN_DISPATCH: runner
+      RUNNER_POLL_SECONDS: ${RUNNER_POLL_SECONDS:-2.0}
+      # Claim ownership (docs/security/sandbox.md, "Runner crashes"): heartbeat interval, how
+      # long a silent heartbeat takes to be declared stale, and the hard per-scan ceiling.
+      RUNNER_HEARTBEAT_SECONDS: ${RUNNER_HEARTBEAT_SECONDS:-10}
+      RUNNER_STALE_SECONDS: ${RUNNER_STALE_SECONDS:-120}
+      RUNNER_MAX_SCAN_SECONDS: ${RUNNER_MAX_SCAN_SECONDS:-1800}
+      RUNNER_RECONCILE_SECONDS: ${RUNNER_RECONCILE_SECONDS:-30}
+      # Scopes orphan-container cleanup to this deployment (empty: the workspace volume name).
+      ANALYZER_INSTANCE: ${ANALYZER_INSTANCE:-}
+      ANALYZER_CPU_GRACE_SECONDS: ${ANALYZER_CPU_GRACE_SECONDS:-30}
+      # Empty: the hostname, i.e. the container id, unique per replica. Only set it for a
+      # single runner; replicas sharing an id would recover each other's claims.
+      RUNNER_ID: ${RUNNER_ID:-}
     volumes:
       - ./ml/models:/app/ml/models:ro
       # Off-chain evidence, kept so that verification can recompute hashes. A named volume, never
@@ -143,6 +189,41 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Claims queued scans and runs each content-reading step in a fresh analyzer container.
+  # The ONLY service with the Docker socket. It has no published port and no HTTP server.
+  # The socket is root-equivalent on the host: keep this service minimal (docs/security/sandbox.md).
+  scan-runner:
+    build:
+      context: ./backend
+      target: runner
+    image: provenancex-runner:0.1.0
+    command: ["python", "-m", "app.runner"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - workspace:/app/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The group that owns the socket: `stat -c %g /var/run/docker.sock` (make up detects it).
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    # Come back after a crash: startup recovery then fails the interrupted scan, replaces its
+    # claim and removes its analyzer containers. `docker compose stop` still stops it for good.
+    restart: unless-stopped
+    # On SIGTERM the runner finishes its current scan. Give it the per-scan ceiling
+    # (RUNNER_MAX_SCAN_SECONDS, 30m) plus a minute; an idle runner exits at once. If it is
+    # killed anyway, analyzer containers stop at their own deadline and are reconciled.
+    stop_grace_period: ${RUNNER_STOP_GRACE_PERIOD:-31m}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -161,4 +242,6 @@ services:
 
 volumes:
   pgdata:
+  # Explicitly named, because analyzer containers mount it by name (volume-subpath).
   workspace:
+    name: ${ANALYZER_WORKSPACE_VOLUME:-provenancex_workspace}

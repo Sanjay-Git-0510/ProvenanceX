@@ -1,8 +1,10 @@
 """Pipeline step 9: static analysis features and category="static" findings.
 
-Runs for software and model scans, after provenance. Artifact code is only parsed. The
-findings are suspicious signals with ProvenanceX rule severities and no CVSS, so they
-stay visibly separate from known vulnerabilities.
+Runs for software and model scans, after provenance. The analysis itself ran inside the
+analyzer sandbox (app/sandbox_worker/collect.py); this stage only validates and stores its
+output. Artifact code is only parsed, never run. The findings are suspicious signals with
+ProvenanceX rule severities and no CVSS, so they stay visibly separate from known
+vulnerabilities.
 """
 
 from dataclasses import dataclass
@@ -11,24 +13,22 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.analysis.base import section_to_error
+from app.analysis.codec import static_from_dict
+from app.core.errors import AppError, ErrorCode
 from app.db.models import Finding, FindingCategory, Scan
 from app.pipeline.stages import StageStatus, execute_stage
-from app.pipeline.workspace import MB, Workspace
-from app.scanners.static.analyzer import GroupedFinding, StaticLimits, analyze_artifact
+from app.sandbox_worker.protocol import AnalysisOut
+from app.scanners.static.analyzer import GroupedFinding
 
 STAGE = "static"
-KB = 1024
 
 
 @dataclass(frozen=True)
 class StaticExtras:
-    """Pipeline-specific inputs."""
+    """Pipeline-specific inputs. The pickle/auto_map inputs are computed in the analyzer."""
 
     input_source: str = "provenancex"  # "mock" when files came from a mock provider
-    auto_map_targets: int = 0
-    pickle_dangerous_globals: int | None = None  # None: not a model scan, or AI-BOM failed
-    undownloaded_files: int = 0
 
 
 def _finding(scan_id: UUID, source: str, g: GroupedFinding) -> Finding:
@@ -60,30 +60,19 @@ def _finding(scan_id: UUID, source: str, g: GroupedFinding) -> Finding:
 def run_static_stage(
     session: Session,
     scan_id: UUID,
-    workspace: Workspace,
-    settings: Settings,
+    collected: AnalysisOut,
     extras: StaticExtras,
 ) -> dict[str, Any] | None:
     source = "mock" if extras.input_source == "mock" else "provenancex"
-    limits = StaticLimits(
-        max_files=settings.static_max_files,
-        max_file_bytes=settings.static_max_file_kb * KB,
-        max_total_bytes=settings.static_max_total_mb * MB,
-        max_findings=settings.static_max_findings,
-        max_compression_ratio=settings.max_compression_ratio,
-        ratio_warn_fraction=settings.static_archive_ratio_warn_fraction,
-    )
 
     def body(scan: Scan) -> tuple[dict[str, Any], StageStatus, dict[str, Any]]:
-        result = analyze_artifact(
-            workspace.src_dir,
-            limits,
-            upload_path=workspace.upload_path,
-            max_tree_files=settings.max_artifact_files,
-            auto_map_targets=extras.auto_map_targets,
-            pickle_dangerous_globals=extras.pickle_dangerous_globals,
-            undownloaded_files=extras.undownloaded_files,
-        )
+        if collected.static_error is not None:
+            raise section_to_error(collected.static_error)
+        if collected.static is None:
+            raise AppError(
+                ErrorCode.ANALYZER_OUTPUT_INVALID, "The analyzer returned no static result", 502
+            )
+        result = static_from_dict(collected.static)
         session.add_all(_finding(scan.id, source, g) for g in result.findings)
         incomplete = result.not_analyzed_count > 0 or result.findings_truncated
         status = StageStatus.PARTIAL if incomplete else StageStatus.COMPLETED

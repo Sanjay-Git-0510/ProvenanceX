@@ -9,7 +9,9 @@ takes a software repo or package, or an AI model artifact, and does the followin
 
 > **Status: Phase 9 complete (CI gate, end-to-end test, demo).** Software (GitHub URL or ZIP) and AI/ML artifacts (Hugging Face URL or
 > model-directory ZIP) are fetched safely, hashed with SHA-256, and analyzed for SBOM or AI-BOM, dependency or lineage graph,
-> known vulnerabilities, provenance and static signals. On the host, an optional Docker sandbox adds behavior evidence (off by default).
+> known vulnerabilities, provenance and static signals. **Every step that reads artifact content runs in a disposable, network-less
+> analyzer container** launched by the `scan-runner` service; there is no host fallback ([docs/security/sandbox.md](docs/security/sandbox.md)).
+> An optional behavioral sandbox adds dynamic evidence (off by default).
 > ML, risk scoring and ALLOW/REVIEW/BLOCK decisions work. Completed scans can be anchored on a local chain and verified. All ten
 > dashboard pages use the real API. The CI/CD page shows the gate rule only, because the gate does not report runs back to it. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
@@ -34,13 +36,17 @@ The development machine is Windows with WSL2 Ubuntu. Keep the repo on the Linux 
 
 ```bash
 cp .env.example .env          # then edit POSTGRES_PASSWORD and DATABASE_URL
-docker compose up --build -d
+make up                       # builds the analyzer sandbox image, detects the Docker socket group,
+                              # then: docker compose up --build -d
 curl http://localhost:8000/api/v1/health/ready
 # {"status":"ready","db":"ok","version":"0.1.0"}
 open http://localhost:5173    # the dashboard; the header badge shows API and DB status
 ```
 
-The API container runs `alembic upgrade head` on startup.
+The API container runs `alembic upgrade head` on startup. The API only queues scans; the `scan-runner` service (the only
+service with the Docker socket) runs them, and every content-reading step happens in an analyzer container. Without
+Docker or the analyzer image, scans fail with `sandbox_unavailable` and nothing is processed. See
+[docs/security/sandbox.md](docs/security/sandbox.md).
 
 ## Demo (one command)
 
@@ -88,6 +94,8 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --reload      # needs DATABASE_URL pointing at a running Postgres
+# Scans need the scan runner and the analyzer image (Docker): in a second shell
+make analyzer-image && make runner           # runs app.runner with ANALYZER_WORKSPACE_MOUNT=bind
 
 # Frontend
 cd frontend
@@ -247,7 +255,9 @@ Input safety:
 - ZIPs: rejected for path traversal, absolute paths, symlinks, special files, encryption, duplicate entries, decompression bombs, or size and file-count limits.
 - git: shallow clone, hooks, submodules, redirects and LFS disabled, with a timeout and size cap.
 
-## Optional Docker sandbox
+## Optional behavioral (dynamic) sandbox
+
+This is separate from the mandatory analyzer sandbox: `SANDBOX_PROVIDER=disabled` turns off behavior observation only.
 
 The sandbox is **off by default** (`SANDBOX_PROVIDER=disabled`). When it is enabled, it runs real
 untrusted code inside a disposable container, so read the limitations below first.
@@ -257,9 +267,9 @@ untrusted code inside a disposable container, so read the limitations below firs
 docker build -t provenancex-sandbox:0.1.0 docker/sandbox
 # or: docker compose --profile sandbox-image build sandbox-image
 
-# Run the API on the host, with Docker available
+# Run the scan runner on the host, with Docker available (the API can stay in Compose or on the host)
 cd backend
-SANDBOX_PROVIDER=docker .venv/bin/uvicorn app.main:app --port 8000
+SANDBOX_PROVIDER=docker ANALYZER_WORKSPACE_MOUNT=bind .venv/bin/python -m app.runner
 
 # Live boundary tests
 PROVENANCEX_SANDBOX_TESTS=1 .venv/bin/pytest -m sandbox
@@ -276,15 +286,16 @@ the stage says why, and behavior features stay `null`.
 Limitations:
 - **Do not run real malware through this sandbox on the host.** It is for controlled fixtures and
   development. Analyzing real malware needs a disposable VM with no route to anything you care about.
-- **The sandbox needs the API running on the host with Docker.** Inside Compose the API has no
-  Docker access by design, so with `SANDBOX_PROVIDER=docker` the stage reports `unavailable`.
+- **The behavioral sandbox needs the scan runner on the host.** It mounts the workspace by host path,
+  which the Compose scan-runner cannot provide yet, so leave `SANDBOX_PROVIDER=disabled` there.
 - **Observed code can interfere with its own trace.** It can kill the tracer, rewrite `/trace` and
   write to the bundle through `/proc/1/fd`, so quiet telemetry is not proof of safety.
 - **A kernel or container escape is outside this boundary.** Containers share the host (WSL2)
   kernel, and the sandbox runs as the workspace owner's uid (never 0). If that user is in the `docker`
   or `sudo` groups, an escape can lead to root in WSL and to Windows files.
-- **The host API has Docker access, which is root-equivalent, while it parses untrusted input.** See
-  [docs/architecture.md](docs/architecture.md) for this and the cleanup-failure and image-by-tag limits.
+- **The scan runner has Docker access, which is root-equivalent.** It no longer parses artifact
+  content (that runs in the analyzer container), but it still performs downloads until Milestone B. See
+  [docs/security/sandbox.md](docs/security/sandbox.md) and [docs/architecture.md](docs/architecture.md).
 
 ## Local chain
 
@@ -370,7 +381,8 @@ summary. It needs only Python 3.11 or newer. `.github/workflows/provenancex-gate
 `contents: read` and no secrets.
 
 ```bash
-docker compose up --build --wait api
+make analyzer-image
+DOCKER_SOCKET_GID=$(stat -c %g /var/run/docker.sock) docker compose up --build --wait api scan-runner
 python3 scripts/ci_gate.py path/to/project                    # or: make gate GATE_PATH=path/to/project
 python3 scripts/ci_gate.py path/to/model --kind model --fail-on-review
 ```
@@ -398,7 +410,9 @@ A pass is not a statement that an artifact is safe: read the not-evaluated layer
 - A pass from the gate is not a statement that an artifact is safe.
 - The `hash_consistency_failed` BLOCK needs a source URL, so it cannot fire through an upload. It has unit tests only.
 - The demo's frontend image runs the Vite dev server. There is no production frontend image.
-- The sandbox needs the API on the host. Do not run real malware through it. See "Optional Docker sandbox".
+- The optional behavioral sandbox needs the scan runner on the host (bind mounts). Do not run real malware through it.
+- Downloads (git clone, Hugging Face fetch) and `POST /verify`'s re-hash still run outside the analyzer sandbox; see
+  "Not yet sandboxed" in [docs/security/sandbox.md](docs/security/sandbox.md).
 - The local chain runs in memory, so a restart erases its anchors.
 - 5 frontend npm advisories are open and unfixed: see [docs/security/npm-audit-triage.md](docs/security/npm-audit-triage.md).
   The `contracts/` tooling has separate, untriaged advisories.
@@ -410,7 +424,8 @@ A pass is not a statement that an artifact is safe: read the not-evaluated layer
 - A fresh-clone reproduction of this README on a clean machine.
 - `pytest -m network`, `sandbox` and `chain` as full suites since their last recorded runs in Phase 7. The end-to-end
   test covers part of the network and chain paths.
-- A complete scan with the sandbox enabled through the Compose stack. It cannot work there by design.
+- A complete scan with the *behavioral* sandbox enabled through the Compose stack (not supported there yet). Content
+  analysis through the Compose scan-runner and analyzer containers was run on 2026-11-18.
 - A recorded check of the final CI/CD page and of responsive layout in a real browser. The tests use jsdom, which has no
   layout.
 - A live `hash_consistency_failed` BLOCK, and a wrong chain ID on a real chain.

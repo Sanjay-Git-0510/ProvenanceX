@@ -18,7 +18,7 @@ from app.pipeline.providers import ScanProviders, build_providers
 from app.scanners.sbom.base import SbomResult
 from app.scanners.sbom.mock import MOCK_SBOM_PATH, MockSbomProvider
 from app.scanners.vulns.mock import MockVulnProvider
-from tests.conftest import SIMPLE_PROJECT, zip_dir
+from tests.conftest import SIMPLE_PROJECT, attach_test_analyzer, zip_dir
 
 URL = "/api/v1/scans/software"
 
@@ -32,6 +32,8 @@ def _run_scan(client) -> dict:
 
 
 def _client(test_settings, session_factory, providers) -> TestClient:
+    if providers.analyzer is None:
+        attach_test_analyzer(providers, test_settings)
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_session_factory] = lambda: session_factory

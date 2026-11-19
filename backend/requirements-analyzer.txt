@@ -1,0 +1,13 @@
+# Exact versions for the analyzer sandbox image (docker/analyzer/Dockerfile), installed with
+# --no-deps so nothing unpinned is pulled in. Only what app.sandbox_worker imports: settings
+# (pydantic, pydantic-settings), PyYAML (model cards, SafeLoader only) and networkx
+# (config/version digests). No web framework, DB, HTTP or chain client, no ML packages.
+pydantic==2.14.3
+pydantic_core==2.50.4
+annotated-types==0.8.0
+typing_extensions==4.16.0
+typing-inspection==0.4.5
+pydantic-settings==2.16.2
+python-dotenv==1.2.4
+PyYAML==6.0.3
+networkx==3.7

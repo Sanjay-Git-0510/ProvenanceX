@@ -22,7 +22,7 @@ function trapTab(event, panel) {
 }
 
 /** Dialog with a frosted backdrop and a solid panel. Focus is trapped and then restored. */
-export default function Modal({ open, onClose, title, footer, children }) {
+export default function Modal({ open, onClose, title, footer, children, dismissOnBackdrop = true, hideClose = false }) {
   const titleId = useId();
   const panelRef = useRef(null);
   const closeRef = useRef(onClose);
@@ -55,7 +55,7 @@ export default function Modal({ open, onClose, title, footer, children }) {
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (dismissOnBackdrop && event.target === event.currentTarget) onClose();
       }}
     >
       <div
@@ -66,9 +66,11 @@ export default function Modal({ open, onClose, title, footer, children }) {
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        <button type="button" className="modal__close" aria-label="Close" onClick={onClose}>
-          <X size={16} aria-hidden="true" />
-        </button>
+        {hideClose ? null : (
+          <button type="button" className="modal__close" aria-label="Close" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        )}
         <h2 className="modal__title" id={titleId}>
           {title}
         </h2>

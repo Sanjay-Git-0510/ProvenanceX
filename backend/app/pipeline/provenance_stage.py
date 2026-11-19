@@ -17,7 +17,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.hashing import list_tree_files
 from app.db.models import (
     Artifact,
     Finding,
@@ -49,6 +48,8 @@ class ProvenanceExtras:
     hf_source: str | None = None
     manifest_sha256: str | None = None
     lineage_features: dict[str, Any] | None = None
+    # The artifact's file list, as the analyzer sandbox (or the Hub listing) reported it.
+    # The stage never walks the workspace itself.
     file_paths: list[str] = field(default_factory=list)
 
 
@@ -144,10 +145,7 @@ def run_provenance_stage(
     def body(scan: Scan) -> tuple[dict[str, Any], StageStatus, dict[str, Any]]:
         artifact = scan.artifact
         meta = scan.ingest_metadata or {}
-        paths = extras.file_paths or [
-            rel.decode("utf-8", errors="replace")
-            for rel, _ in list_tree_files(workspace.src_dir, max_files=max_files)
-        ]
+        paths = list(extras.file_paths)
         lineage = extras.lineage_features or {}
         inputs = ProvenanceInputs(
             source=str(artifact.source),
