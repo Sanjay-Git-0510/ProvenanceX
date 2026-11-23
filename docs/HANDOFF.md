@@ -27,9 +27,17 @@ _Last updated: 2026-11-23_
   - Docker Desktop restart: `docker_restart_pre.sh` PASS. First `docker_restart_post.sh` run FAILED: the fresh
     GitHub scan failed at `staging` with `sandbox_unavailable` and verify_e2e.py crashed on the missing `sbom`
     stage (its in-flight-scan checks scrolled off; cause not investigated). A second run passed 48/48, including
-    in-flight scan `runner_interrupted`, holder/fetcher/staging volume/workspace removed. Open question: whether the
-    runner auto-started by Docker Desktop needs a recreate before it can reach Docker; repeat the pre/restart/post
-    cycle to confirm.
+    in-flight scan `runner_interrupted`, holder/fetcher/staging volume/workspace removed.
+  - Docker Desktop restart, second full cycle (logs in `~/.local/state/provenancex-milestone-b/logs/`): pre PASS. After
+    the restart Docker auto-started the runner (`unless-stopped`) but left postgres, api and hardhat exited; the
+    runner logged `failed to resolve host 'postgres'` until `docker_restart_post.sh` brought the stack up. Post:
+    the 4 in-flight recovery checks passed (`runner_interrupted`, containers, staging volume and workspace removed) and
+    the fresh GitHub scan passed every check; the earlier `sandbox_unavailable` did not reproduce. verify_e2e.py then
+    crashed on the host's own Hub listing fetch (`Temporary failure in name resolution` for huggingface.co: WSL DNS
+    not yet settled after the restart; not a product failure). Re-running `verify_e2e.py` alone against the same
+    post-restart stack: 48/48 passed (exit 0), including the HF manifest digest, file verification, AI-BOM,
+    isolation and no-leftover checks. Result: restart recovery verified. Not fixed: the first-cycle
+    `sandbox_unavailable` cause is unknown (not reproduced), and verify_e2e.py has no retry on host DNS.
   - Verified: ruff clean (388 files); backend 3550 passed, 163 skipped; frontend lint clean, Vitest 571 passed, build OK.
 
 - **Phase 9 (UI/UX redesign, Master Implementation Prompt): 2026-11-23, uncommitted, awaiting owner review.**
