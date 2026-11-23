@@ -10,6 +10,7 @@ import {
   noRisk,
   renderPage,
   riskResult,
+  riskSummary,
   scanList,
   scanRow,
 } from "../test/helpers.jsx";
@@ -175,5 +176,34 @@ describe("Risk Analysis", () => {
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.getByRole("region", { name: "Decision" })).toBeInTheDocument());
+  });
+
+  it("shows the policy v2 summary, evidence status, completeness and top factors", async () => {
+    stub(riskResult({ summary: riskSummary() }));
+    const { container } = open();
+    const summary = await screen.findByRole("region", { name: "Risk summary" });
+    expect(summary).toHaveTextContent("LOW RISK");
+    expect(summary).toHaveTextContent("No confirmed evidence");
+    expect(summary).toHaveTextContent("hand-set");
+    const status = screen.getByRole("region", { name: "Evidence status" });
+    expect(within(status).getByText("Known vulnerability")).toBeInTheDocument();
+    expect(within(status).getByText("Missing evidence")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Evidence completeness" })).toHaveTextContent("Vulnerability, Behavioral");
+    expect(screen.getByRole("region", { name: "Top contributing factors" })).toHaveTextContent("Script presence = Yes");
+    expectEveryAllowHasCaveat(container);
+  });
+
+  it("marks a pre-v2 result and does not hide its panels", async () => {
+    stub(riskResult({ summary: riskSummary({ confirmed_evidence: null, evidence_status: [], notes: ["Earlier policy note."] }) }));
+    open();
+    const status = await screen.findByRole("region", { name: "Evidence status" });
+    expect(status).toHaveTextContent("earlier policy");
+    expect(screen.getByRole("region", { name: "Risk summary" })).toHaveTextContent("Evidence status was not recorded");
+  });
+
+  it("says when a result has no summary at all", async () => {
+    stub();
+    open();
+    expect(await screen.findByText(/No risk summary is available/)).toBeInTheDocument();
   });
 });

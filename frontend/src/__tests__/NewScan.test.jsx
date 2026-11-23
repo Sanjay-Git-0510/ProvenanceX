@@ -5,6 +5,23 @@ import { SCAN_ID, mockApi, renderPage } from "../test/helpers.jsx";
 const CREATED = { scan_id: SCAN_ID, artifact_id: SCAN_ID, status: "queued" };
 const DONE = [new RegExp(`/scans/${SCAN_ID}$`), { scan_id: SCAN_ID, status: "completed", stages: null, error: null }];
 const GITHUB = "https://github.com/pallets/flask";
+const LIMITS = [
+  /\/limits$/,
+  {
+    max_upload_mb: 1,
+    max_artifact_size_mb: 2,
+    max_artifact_files: 50,
+    max_url_length: 2048,
+    max_revision_length: 200,
+    upload_extensions: [".zip"],
+    allowed_hosts: { software: ["github.com"], model: ["huggingface.co"] },
+    artifact_types: { software: ["software"], model: ["model", "lora", "dataset"] },
+    sandbox_provider: "disabled",
+    blockchain_provider: "disabled",
+    blockchain_anchor_on_scan: false,
+  },
+];
+const posts = (fetchMock) => fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -15,37 +32,93 @@ const location = () => screen.getByTestId("location").textContent;
 
 describe("New Scan", () => {
   it("starts a software scan and opens it", async () => {
-    const fetchMock = mockApi([[/\/scans\/software/, CREATED], DONE]);
+    const fetchMock = mockApi([LIMITS, [/\/scans\/software/, CREATED], DONE]);
     render();
     fireEvent.change(urlField(), { target: { value: GITHUB } });
     fireEvent.change(screen.getByLabelText(/^Revision/), { target: { value: "main" } });
     submit();
     await waitFor(() => expect(location()).toBe(`/scans/${SCAN_ID}`));
-    const [url, options] = fetchMock.mock.calls[0];
+    const [url, options] = posts(fetchMock)[0];
     expect(url).toBe("/api/v1/scans/software");
     expect(Object.fromEntries(options.body)).toEqual({ source_url: GITHUB, revision: "main" });
   });
 
-  it("starts a model scan with its artifact type", async () => {
-    const fetchMock = mockApi([[/\/scans\/model/, CREATED], DONE]);
+  it.each([
+    ["AI model", "https://huggingface.co/a/b", "model"],
+    ["LoRA adapter", "https://huggingface.co/a/adapter", "lora"],
+    ["Dataset", "https://huggingface.co/datasets/a/b", "dataset"],
+  ])("starts a %s scan with its artifact type", async (label, value, type) => {
+    const fetchMock = mockApi([LIMITS, [/\/scans\/model/, CREATED], DONE]);
     render();
-    fireEvent.click(screen.getByLabelText("AI / ML"));
-    fireEvent.change(screen.getByLabelText("Model artifact type"), { target: { value: "lora" } });
-    fireEvent.change(urlField(), { target: { value: "https://huggingface.co/a/b" } });
+    fireEvent.click(screen.getByLabelText(new RegExp(`^${label}`)));
+    fireEvent.change(urlField(), { target: { value } });
     submit();
     await waitFor(() => expect(location()).toBe(`/scans/${SCAN_ID}`));
-    expect(fetchMock.mock.calls[0][1].body.get("artifact_type")).toBe("lora");
+    const [url, options] = posts(fetchMock)[0];
+    expect(url).toBe("/api/v1/scans/model");
+    expect(options.body.get("artifact_type")).toBe(type);
+  });
+
+  it("shows the hint for the chosen workflow", () => {
+    mockApi([LIMITS]);
+    render();
+    fireEvent.click(screen.getByLabelText(/^LoRA adapter/));
+    expect(screen.getByText(/base model is recorded as lineage/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Hugging Face URL")).toBeInTheDocument();
+  });
+
+  it("refuses a dataset address in the model workflow before calling the API", () => {
+    const fetchMock = mockApi([LIMITS]);
+    render();
+    fireEvent.click(screen.getByLabelText(/^AI model/));
+    fireEvent.change(urlField(), { target: { value: "https://huggingface.co/datasets/a/b" } });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("Dataset workflow");
+    expect(urlField()).toHaveAttribute("aria-invalid", "true");
+    expect(posts(fetchMock)).toHaveLength(0);
+  });
+
+  it("refuses a bad revision next to its field", () => {
+    const fetchMock = mockApi([LIMITS]);
+    render();
+    fireEvent.change(urlField(), { target: { value: GITHUB } });
+    fireEvent.change(screen.getByLabelText(/^Revision/), { target: { value: "--upload-pack=x" } });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("branch name, tag or full commit SHA");
+    expect(posts(fetchMock)).toHaveLength(0);
+  });
+
+  it("shows the server limits and refuses an oversized upload", async () => {
+    const fetchMock = mockApi([LIMITS]);
+    render();
+    expect(await screen.findByText(/Uploads up to 1 MB and 50 files/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Upload ZIP"));
+    const big = new File([new Uint8Array(2 * 1024 * 1024)], "big.zip");
+    fireEvent.change(screen.getByLabelText("ZIP file"), { target: { files: [big] } });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("up to 1 MB");
+    expect(posts(fetchMock)).toHaveLength(0);
+  });
+
+  it("says when the limits cannot be loaded and leaves the size check to the server", async () => {
+    const fetchMock = mockApi([[/\/scans\/software/, CREATED], DONE]);
+    render();
+    expect(await screen.findByText(/Server limits could not be loaded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Upload ZIP"));
+    fireEvent.change(screen.getByLabelText("ZIP file"), { target: { files: [new File(["zip"], "p.zip")] } });
+    submit();
+    await waitFor(() => expect(posts(fetchMock)).toHaveLength(1));
   });
 
   it("uploads a ZIP", async () => {
-    const fetchMock = mockApi([[/\/scans\/software/, CREATED], DONE]);
+    const fetchMock = mockApi([LIMITS, [/\/scans\/software/, CREATED], DONE]);
     render();
     fireEvent.click(screen.getByLabelText("Upload ZIP"));
     const file = new File(["zip"], "project.ZIP");
     fireEvent.change(screen.getByLabelText("ZIP file"), { target: { files: [file] } });
     submit();
     await waitFor(() => expect(location()).toBe(`/scans/${SCAN_ID}`));
-    expect(fetchMock.mock.calls[0][1].body.get("file").name).toBe("project.ZIP");
+    expect(posts(fetchMock)[0][1].body.get("file").name).toBe("project.ZIP");
   });
 
   it.each([
@@ -58,16 +131,16 @@ describe("New Scan", () => {
     "not a url",
     "",
   ])("refuses %s for a software scan without calling the API", (value) => {
-    const fetchMock = mockApi([]);
+    const fetchMock = mockApi([LIMITS]);
     render();
     fireEvent.change(urlField(), { target: { value } });
     submit();
     expect(screen.getByRole("alert")).toHaveTextContent("GitHub");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(posts(fetchMock)).toHaveLength(0);
   });
 
   it("refuses a non-ZIP upload and a missing file", () => {
-    const fetchMock = mockApi([]);
+    const fetchMock = mockApi([LIMITS]);
     render();
     fireEvent.click(screen.getByLabelText("Upload ZIP"));
     submit();
@@ -75,7 +148,7 @@ describe("New Scan", () => {
     fireEvent.change(screen.getByLabelText("ZIP file"), { target: { files: [new File(["x"], "a.tar")] } });
     submit();
     expect(screen.getByRole("alert")).toHaveTextContent("Only .zip");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(posts(fetchMock)).toHaveLength(0);
   });
 
   it("shows a structured API error, redacted, and allows another try", async () => {
@@ -108,8 +181,11 @@ describe("New Scan", () => {
     submit();
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("github.com/pallets/flask");
-    expect(dialog).toHaveTextContent("Software");
+    expect(dialog).toHaveTextContent("Software package");
     expect(await within(dialog).findByText("Running")).toBeInTheDocument();
+    const stages = within(dialog).getByRole("list", { name: "Scan stages" });
+    expect(within(stages).getByText("Generate SBOM")).toBeInTheDocument();
+    expect(within(stages).queryByText("Done")).toBeNull();
     expect(within(dialog).getByText(/^00:0\d$/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Starting scan", hidden: true })).toBeDisabled();
     expect(location()).toBe("/scans/new");

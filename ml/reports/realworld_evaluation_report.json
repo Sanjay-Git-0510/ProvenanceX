@@ -1,0 +1,1038 @@
+{
+  "config": {
+    "anomaly_target_fpr": 0.1,
+    "bootstrap_resamples": 1000,
+    "iforest_estimators": 300,
+    "repeated_seeds": 20,
+    "rf_estimators": 300,
+    "rf_min_samples_leaf": 2,
+    "seed": 42,
+    "xgb_estimators": 200,
+    "xgb_learning_rate": 0.1,
+    "xgb_max_depth": 4
+  },
+  "dataset_version": "realworld-v1",
+  "evidence_gaps": [
+    "model: no model; fewer than 15 usable rows for: benign, known_vulnerable (rule-based / REVIEW fallback kept)",
+    "lora: no model; fewer than 15 usable rows for: benign, known_vulnerable (rule-based / REVIEW fallback kept)",
+    "dataset: no model; fewer than 15 usable rows for: benign, known_vulnerable (rule-based / REVIEW fallback kept)",
+    "confirmed_malicious: 296 registry packages, metadata only by owner decision; no feature rows, so no malicious-class model. Malware stays with rules + REVIEW.",
+    "suspicious: no record carried a Hub 'unsafe' flag in this collection; no class.",
+    "Hugging Face: no advisory database exists for Hub repositories, so no model, LoRA or dataset can be known_vulnerable; benign HF models exceeded the 600 MB scan budget.",
+    "unknown: 166 manifest rows failed the benign criteria and are excluded (missing evidence is not benign).",
+    "known_vulnerable labels the package's own code; the scanner's vulnerability features describe dependencies, so the label may not be visible in the features (see the label evidence check per model).",
+    "Benign is criteria-based, not ground truth: a package with an undisclosed flaw can pass.",
+    "Every real row is a first scan: hash/config/graph comparison features are null (no_prior_scan); behavior features are null while the dynamic sandbox is disabled.",
+    "Seeds are popular projects and advisories are recent: the sample is not representative of all packages."
+  ],
+  "excluded": {
+    "not_usable:failed": 5,
+    "not_usable:submit_error": 5
+  },
+  "feature_rows_read": 54,
+  "manifest_sha256": "5b6938c1f3475dd3a91bea69d19ea91dcc441f3aedb1a7d09812a92f89b4c53c",
+  "models": {
+    "software": {
+      "ablation": [
+        {
+          "f1": 0.7692307692307693,
+          "fpr": 0.75,
+          "pr_auc": 0.5449999999999999,
+          "removed_layer": "dependency",
+          "roc_auc": 0.475
+        },
+        {
+          "f1": 0.5,
+          "fpr": 0.25,
+          "pr_auc": 0.7116666666666667,
+          "removed_layer": "vulnerability",
+          "roc_auc": 0.625
+        },
+        {
+          "f1": 0.4444444444444444,
+          "fpr": 0.5,
+          "pr_auc": 0.5628571428571428,
+          "removed_layer": "ai_model",
+          "roc_auc": 0.525
+        },
+        {
+          "f1": 0.4444444444444444,
+          "fpr": 0.5,
+          "pr_auc": 0.5783333333333333,
+          "removed_layer": "provenance",
+          "roc_auc": 0.525
+        },
+        {
+          "f1": 0.4444444444444444,
+          "fpr": 0.5,
+          "pr_auc": 0.5628571428571428,
+          "removed_layer": "metadata",
+          "roc_auc": 0.525
+        },
+        {
+          "f1": 0.7692307692307693,
+          "fpr": 0.75,
+          "pr_auc": 0.6183333333333333,
+          "removed_layer": "static",
+          "roc_auc": 0.525
+        },
+        {
+          "f1": 0.4444444444444444,
+          "fpr": 0.5,
+          "pr_auc": 0.5628571428571428,
+          "removed_layer": "behavior",
+          "roc_auc": 0.525
+        },
+        {
+          "f1": 0.4444444444444444,
+          "fpr": 0.5,
+          "pr_auc": 0.5783333333333333,
+          "removed_layer": "graph",
+          "roc_auc": 0.525
+        }
+      ],
+      "artifact_manifest": {
+        "files": {
+          "isolation_forest.skops": {
+            "bytes": 5364326,
+            "sha256": "9b44d1a39808e0843379db8a336fd57ceb2a267d1605df03ade0f00eef3115c1"
+          },
+          "preprocessing.json": {
+            "bytes": 4282,
+            "sha256": "884a0ba85dcff73ac7394f1da393c6863e3de4d661d44017434cce28dfb1345b"
+          },
+          "random_forest.skops": {
+            "bytes": 5167532,
+            "sha256": "6e547a0b3f21ee30e0d0063cf174240c090cd8d8a69215fb4088b789872d7909"
+          },
+          "thresholds.json": {
+            "bytes": 590,
+            "sha256": "c64533980fde84c7e793f8ac0808f4d2b375195295dd48ed75374a8116c02b18"
+          },
+          "training_metadata.json": {
+            "bytes": 1648,
+            "sha256": "a200bc76ac5d75f1290ea44dc65253dd10f7b63c31cb7fa2bc7b407a93d5ba52"
+          },
+          "xgboost.json": {
+            "bytes": 124815,
+            "sha256": "d61ec968272aeefb37549b2a1986ef2fe8b07d447f51ed6c7d7361a21679eeda"
+          }
+        },
+        "format": "provenancex-realworld-models-v1",
+        "library_versions": {
+          "numpy": "2.5.4",
+          "scikit-learn": "1.9.1",
+          "skops": "0.16.0",
+          "xgboost": "3.4.1"
+        },
+        "python_version": "3.14.4",
+        "synthetic": false
+      },
+      "observability": {
+        "benign_rows_with_vulnerable_count_gt_0": "6/20",
+        "known_vulnerable_rows_with_vulnerable_count_gt_0": "8/24",
+        "note": "vulnerable_count counts dependency advisories; the label is the package's own"
+      },
+      "repeated": {
+        "seeds": 20,
+        "skipped": 0,
+        "summary": {
+          "random_forest": {
+            "f1": {
+              "max": 0.8,
+              "mean": 0.6946,
+              "min": 0.5,
+              "n": 20,
+              "std": 0.0866
+            },
+            "fnr": {
+              "max": 0.6,
+              "mean": 0.2,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.2
+            },
+            "fpr": {
+              "max": 1.0,
+              "mean": 0.6,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.3102
+            },
+            "pr_auc": {
+              "max": 0.9267,
+              "mean": 0.7644,
+              "min": 0.5593,
+              "n": 20,
+              "std": 0.1207
+            },
+            "roc_auc": {
+              "max": 0.9,
+              "mean": 0.69,
+              "min": 0.45,
+              "n": 20,
+              "std": 0.1268
+            }
+          },
+          "rules_only": {
+            "f1": {
+              "max": 0.7143,
+              "mean": 0.6541,
+              "min": 0.5,
+              "n": 20,
+              "std": 0.0597
+            },
+            "fnr": {
+              "max": 0.4,
+              "mean": 0.12,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.1166
+            },
+            "fpr": {
+              "max": 1.0,
+              "mean": 1.0,
+              "min": 1.0,
+              "n": 20,
+              "std": 0.0
+            },
+            "pr_auc": {
+              "max": 0.7111,
+              "mean": 0.5687,
+              "min": 0.4411,
+              "n": 20,
+              "std": 0.0787
+            },
+            "roc_auc": {
+              "max": 0.65,
+              "mean": 0.43,
+              "min": 0.2,
+              "n": 20,
+              "std": 0.1322
+            }
+          },
+          "vulnerability_only": {
+            "f1": {
+              "max": 0.8,
+              "mean": 0.4129,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.2586
+            },
+            "fnr": {
+              "max": 1.0,
+              "mean": 0.64,
+              "min": 0.2,
+              "n": 20,
+              "std": 0.2498
+            },
+            "fpr": {
+              "max": 0.75,
+              "mean": 0.3,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.2031
+            },
+            "pr_auc": {
+              "max": 0.8222,
+              "mean": 0.6147,
+              "min": 0.5,
+              "n": 20,
+              "std": 0.093
+            },
+            "roc_auc": {
+              "max": 0.8,
+              "mean": 0.5075,
+              "min": 0.25,
+              "n": 20,
+              "std": 0.1529
+            }
+          },
+          "xgboost": {
+            "f1": {
+              "max": 0.9091,
+              "mean": 0.7341,
+              "min": 0.6,
+              "n": 20,
+              "std": 0.078
+            },
+            "fnr": {
+              "max": 0.4,
+              "mean": 0.1,
+              "min": 0.0,
+              "n": 20,
+              "std": 0.1342
+            },
+            "fpr": {
+              "max": 1.0,
+              "mean": 0.6875,
+              "min": 0.25,
+              "n": 20,
+              "std": 0.2355
+            },
+            "pr_auc": {
+              "max": 1.0,
+              "mean": 0.6957,
+              "min": 0.5054,
+              "n": 20,
+              "std": 0.1317
+            },
+            "roc_auc": {
+              "max": 1.0,
+              "mean": 0.6038,
+              "min": 0.3,
+              "n": 20,
+              "std": 0.1839
+            }
+          }
+        }
+      },
+      "seed": 42,
+      "split_counts": {
+        "test": {
+          "benign": 4,
+          "known_vulnerable": 5
+        },
+        "train": {
+          "benign": 12,
+          "known_vulnerable": 14
+        },
+        "validation": {
+          "benign": 4,
+          "known_vulnerable": 5
+        }
+      },
+      "test": {
+        "isolation_forest": {
+          "confusion_matrix": {
+            "fn": 5,
+            "fp": 0,
+            "tn": 4,
+            "tp": 0
+          },
+          "f1": 0.0,
+          "fn": 5,
+          "fnr": 1.0,
+          "fp": 0,
+          "fpr": 0.0,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 0,
+            "fpr": 0.0
+          },
+          "pr_auc": 0.5120634920634921,
+          "precision": null,
+          "recall": 0.0,
+          "records": 9,
+          "roc_auc": 0.375,
+          "support": 5,
+          "threshold": 0.6233599779439477,
+          "tn": 4,
+          "tp": 0
+        },
+        "random_forest": {
+          "bootstrap": {
+            "f1_95ci": [
+              0.0,
+              0.8
+            ],
+            "resamples": 1000,
+            "roc_auc_95ci": [
+              0.0,
+              1.0
+            ]
+          },
+          "calibration": {
+            "bins": [
+              {
+                "bin": "0.2-0.4",
+                "mean_predicted": 0.3116,
+                "n": 2,
+                "observed_positive_rate": 0.0
+              },
+              {
+                "bin": "0.4-0.6",
+                "mean_predicted": 0.5007,
+                "n": 6,
+                "observed_positive_rate": 0.8333
+              },
+              {
+                "bin": "0.6-0.8",
+                "mean_predicted": 0.6994,
+                "n": 1,
+                "observed_positive_rate": 0.0
+              }
+            ],
+            "brier": 0.263
+          },
+          "confusion_matrix": {
+            "fn": 3,
+            "fp": 2,
+            "tn": 2,
+            "tp": 2
+          },
+          "f1": 0.4444444444444444,
+          "fn": 3,
+          "fnr": 0.6,
+          "fp": 2,
+          "fpr": 0.5,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 2,
+            "fpr": 0.5
+          },
+          "pr_auc": 0.5628571428571428,
+          "precision": 0.5,
+          "recall": 0.4,
+          "records": 9,
+          "roc_auc": 0.525,
+          "support": 5,
+          "threshold": 0.5647242163658991,
+          "threshold_analysis": [
+            {
+              "fnr": 0.0,
+              "fpr": 1.0,
+              "precision": 0.5555555555555556,
+              "recall": 1.0,
+              "threshold": 0.2
+            },
+            {
+              "fnr": 0.0,
+              "fpr": 0.75,
+              "precision": 0.625,
+              "recall": 1.0,
+              "threshold": 0.3
+            },
+            {
+              "fnr": 0.0,
+              "fpr": 0.5,
+              "precision": 0.7142857142857143,
+              "recall": 1.0,
+              "threshold": 0.4
+            },
+            {
+              "fnr": 0.6,
+              "fpr": 0.5,
+              "precision": 0.5,
+              "recall": 0.4,
+              "threshold": 0.5
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.6
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.0,
+              "precision": null,
+              "recall": 0.0,
+              "threshold": 0.7
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.0,
+              "precision": null,
+              "recall": 0.0,
+              "threshold": 0.8
+            }
+          ],
+          "tn": 2,
+          "tp": 2
+        },
+        "rules_only": {
+          "bootstrap": {
+            "f1_95ci": [
+              0.2,
+              0.875
+            ],
+            "resamples": 1000,
+            "roc_auc_95ci": [
+              0.0,
+              0.7319
+            ]
+          },
+          "confusion_matrix": {
+            "fn": 1,
+            "fp": 4,
+            "tn": 0,
+            "tp": 4
+          },
+          "f1": 0.6153846153846154,
+          "fn": 1,
+          "fnr": 0.2,
+          "fp": 4,
+          "fpr": 1.0,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 4,
+            "fpr": 1.0
+          },
+          "pr_auc": 0.47777777777777775,
+          "precision": 0.5,
+          "recall": 0.8,
+          "records": 9,
+          "roc_auc": 0.325,
+          "rows_no_rule_evaluable": 0,
+          "support": 5,
+          "threshold": 1.0,
+          "tn": 0,
+          "tp": 4
+        },
+        "vulnerability_only": {
+          "confusion_matrix": {
+            "fn": 5,
+            "fp": 1,
+            "tn": 3,
+            "tp": 0
+          },
+          "f1": 0.0,
+          "fn": 5,
+          "fnr": 1.0,
+          "fp": 1,
+          "fpr": 0.25,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 1,
+            "fpr": 0.25
+          },
+          "pr_auc": 0.5555555555555556,
+          "precision": 0.0,
+          "recall": 0.0,
+          "records": 9,
+          "roc_auc": 0.375,
+          "support": 5,
+          "threshold": 1.0,
+          "tn": 3,
+          "tp": 0
+        },
+        "xgboost": {
+          "calibration": {
+            "bins": [
+              {
+                "bin": "0.0-0.2",
+                "mean_predicted": 0.1013,
+                "n": 2,
+                "observed_positive_rate": 0.0
+              },
+              {
+                "bin": "0.2-0.4",
+                "mean_predicted": 0.3117,
+                "n": 3,
+                "observed_positive_rate": 0.6667
+              },
+              {
+                "bin": "0.4-0.6",
+                "mean_predicted": 0.5982,
+                "n": 1,
+                "observed_positive_rate": 1.0
+              },
+              {
+                "bin": "0.6-0.8",
+                "mean_predicted": 0.6475,
+                "n": 2,
+                "observed_positive_rate": 0.5
+              },
+              {
+                "bin": "0.8-1.0",
+                "mean_predicted": 0.8988,
+                "n": 1,
+                "observed_positive_rate": 1.0
+              }
+            ],
+            "brier": 0.2004
+          },
+          "confusion_matrix": {
+            "fn": 0,
+            "fp": 3,
+            "tn": 1,
+            "tp": 5
+          },
+          "f1": 0.7692307692307693,
+          "fn": 0,
+          "fnr": 0.0,
+          "fp": 3,
+          "fpr": 0.75,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 3,
+            "fpr": 0.75
+          },
+          "pr_auc": 0.7861904761904762,
+          "precision": 0.625,
+          "recall": 1.0,
+          "records": 9,
+          "roc_auc": 0.775,
+          "support": 5,
+          "threshold": 0.0722586140036583,
+          "threshold_analysis": [
+            {
+              "fnr": 0.0,
+              "fpr": 0.5,
+              "precision": 0.7142857142857143,
+              "recall": 1.0,
+              "threshold": 0.2
+            },
+            {
+              "fnr": 0.2,
+              "fpr": 0.25,
+              "precision": 0.8,
+              "recall": 0.8,
+              "threshold": 0.3
+            },
+            {
+              "fnr": 0.4,
+              "fpr": 0.25,
+              "precision": 0.75,
+              "recall": 0.6,
+              "threshold": 0.4
+            },
+            {
+              "fnr": 0.4,
+              "fpr": 0.25,
+              "precision": 0.75,
+              "recall": 0.6,
+              "threshold": 0.5
+            },
+            {
+              "fnr": 0.6,
+              "fpr": 0.25,
+              "precision": 0.6666666666666666,
+              "recall": 0.4,
+              "threshold": 0.6
+            },
+            {
+              "fnr": 0.8,
+              "fpr": 0.0,
+              "precision": 1.0,
+              "recall": 0.2,
+              "threshold": 0.7
+            },
+            {
+              "fnr": 0.8,
+              "fpr": 0.0,
+              "precision": 1.0,
+              "recall": 0.2,
+              "threshold": 0.8
+            }
+          ],
+          "tn": 1,
+          "tp": 5
+        }
+      },
+      "thresholds": {
+        "isolation_forest": {
+          "criterion": "benign_validation_fpr_at_most_0.1",
+          "selected_on": "validation",
+          "validation_f1": null,
+          "validation_fpr": 0.0,
+          "value": 0.6233599779439477
+        },
+        "random_forest": {
+          "criterion": "max_f1_benign_vs_any_risk",
+          "selected_on": "validation",
+          "validation_f1": 0.727273,
+          "validation_fpr": 0.5,
+          "value": 0.5647242163658991
+        },
+        "xgboost": {
+          "criterion": "max_f1_benign_vs_any_risk",
+          "selected_on": "validation",
+          "validation_f1": 0.769231,
+          "validation_fpr": 0.75,
+          "value": 0.0722586140036583
+        }
+      },
+      "top_features": [
+        {
+          "column": "suspicious_api_count",
+          "importance": 0.1835
+        },
+        {
+          "column": "dependency_count",
+          "importance": 0.1712
+        },
+        {
+          "column": "transitive_depth",
+          "importance": 0.1304
+        },
+        {
+          "column": "dangerous_import_count",
+          "importance": 0.1272
+        },
+        {
+          "column": "centrality",
+          "importance": 0.111
+        },
+        {
+          "column": "vulnerable_count",
+          "importance": 0.0892
+        },
+        {
+          "column": "cvss_max__is_null",
+          "importance": 0.0784
+        },
+        {
+          "column": "cvss_max",
+          "importance": 0.0593
+        },
+        {
+          "column": "install_hook_count",
+          "importance": 0.0453
+        },
+        {
+          "column": "vulnerable_count__is_null",
+          "importance": 0.0045
+        }
+      ],
+      "validation": {
+        "isolation_forest": {
+          "confusion_matrix": {
+            "fn": 5,
+            "fp": 0,
+            "tn": 4,
+            "tp": 0
+          },
+          "f1": 0.0,
+          "fn": 5,
+          "fnr": 1.0,
+          "fp": 0,
+          "fpr": 0.0,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 0,
+            "fpr": 0.0
+          },
+          "pr_auc": 0.4177777777777778,
+          "precision": null,
+          "recall": 0.0,
+          "records": 9,
+          "roc_auc": 0.0,
+          "support": 5,
+          "threshold": 0.6233599779439477,
+          "tn": 4,
+          "tp": 0
+        },
+        "random_forest": {
+          "calibration": {
+            "bins": [
+              {
+                "bin": "0.2-0.4",
+                "mean_predicted": 0.3642,
+                "n": 1,
+                "observed_positive_rate": 1.0
+              },
+              {
+                "bin": "0.4-0.6",
+                "mean_predicted": 0.5396,
+                "n": 5,
+                "observed_positive_rate": 0.6
+              },
+              {
+                "bin": "0.6-0.8",
+                "mean_predicted": 0.718,
+                "n": 3,
+                "observed_positive_rate": 0.3333
+              }
+            ],
+            "brier": 0.2767
+          },
+          "confusion_matrix": {
+            "fn": 1,
+            "fp": 2,
+            "tn": 2,
+            "tp": 4
+          },
+          "f1": 0.7272727272727273,
+          "fn": 1,
+          "fnr": 0.2,
+          "fp": 2,
+          "fpr": 0.5,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 2,
+            "fpr": 0.5
+          },
+          "pr_auc": 0.6777777777777778,
+          "precision": 0.6666666666666666,
+          "recall": 0.8,
+          "records": 9,
+          "roc_auc": 0.5,
+          "support": 5,
+          "threshold": 0.5647242163658991,
+          "threshold_analysis": [
+            {
+              "fnr": 0.0,
+              "fpr": 1.0,
+              "precision": 0.5555555555555556,
+              "recall": 1.0,
+              "threshold": 0.2
+            },
+            {
+              "fnr": 0.0,
+              "fpr": 1.0,
+              "precision": 0.5555555555555556,
+              "recall": 1.0,
+              "threshold": 0.3
+            },
+            {
+              "fnr": 0.2,
+              "fpr": 1.0,
+              "precision": 0.5,
+              "recall": 0.8,
+              "threshold": 0.4
+            },
+            {
+              "fnr": 0.2,
+              "fpr": 0.75,
+              "precision": 0.5714285714285714,
+              "recall": 0.8,
+              "threshold": 0.5
+            },
+            {
+              "fnr": 0.8,
+              "fpr": 0.5,
+              "precision": 0.3333333333333333,
+              "recall": 0.2,
+              "threshold": 0.6
+            },
+            {
+              "fnr": 0.8,
+              "fpr": 0.25,
+              "precision": 0.5,
+              "recall": 0.2,
+              "threshold": 0.7
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.0,
+              "precision": null,
+              "recall": 0.0,
+              "threshold": 0.8
+            }
+          ],
+          "tn": 2,
+          "tp": 4
+        },
+        "rules_only": {
+          "confusion_matrix": {
+            "fn": 2,
+            "fp": 4,
+            "tn": 0,
+            "tp": 3
+          },
+          "f1": 0.5,
+          "fn": 2,
+          "fnr": 0.4,
+          "fp": 4,
+          "fpr": 1.0,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 4,
+            "fpr": 1.0
+          },
+          "pr_auc": 0.4746031746031746,
+          "precision": 0.42857142857142855,
+          "recall": 0.6,
+          "records": 9,
+          "roc_auc": 0.25000000000000006,
+          "rows_no_rule_evaluable": 0,
+          "support": 5,
+          "threshold": 1.0,
+          "tn": 0,
+          "tp": 3
+        },
+        "vulnerability_only": {
+          "confusion_matrix": {
+            "fn": 4,
+            "fp": 4,
+            "tn": 0,
+            "tp": 1
+          },
+          "f1": 0.2,
+          "fn": 4,
+          "fnr": 0.8,
+          "fp": 4,
+          "fpr": 1.0,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 4,
+            "fpr": 1.0
+          },
+          "pr_auc": 0.48444444444444446,
+          "precision": 0.2,
+          "recall": 0.2,
+          "records": 9,
+          "roc_auc": 0.025,
+          "support": 5,
+          "threshold": 1.0,
+          "tn": 0,
+          "tp": 1
+        },
+        "xgboost": {
+          "calibration": {
+            "bins": [
+              {
+                "bin": "0.0-0.2",
+                "mean_predicted": 0.123,
+                "n": 5,
+                "observed_positive_rate": 0.4
+              },
+              {
+                "bin": "0.2-0.4",
+                "mean_predicted": 0.3371,
+                "n": 3,
+                "observed_positive_rate": 1.0
+              },
+              {
+                "bin": "0.8-1.0",
+                "mean_predicted": 0.9345,
+                "n": 1,
+                "observed_positive_rate": 0.0
+              }
+            ],
+            "brier": 0.4241
+          },
+          "confusion_matrix": {
+            "fn": 0,
+            "fp": 3,
+            "tn": 1,
+            "tp": 5
+          },
+          "f1": 0.7692307692307693,
+          "fn": 0,
+          "fnr": 0.0,
+          "fp": 3,
+          "fpr": 0.75,
+          "no_prior_scan": {
+            "benign_rows": 4,
+            "false_positives": 3,
+            "fpr": 0.75
+          },
+          "pr_auc": 0.655952380952381,
+          "precision": 0.625,
+          "recall": 1.0,
+          "records": 9,
+          "roc_auc": 0.55,
+          "support": 5,
+          "threshold": 0.0722586140036583,
+          "threshold_analysis": [
+            {
+              "fnr": 0.4,
+              "fpr": 0.25,
+              "precision": 0.75,
+              "recall": 0.6,
+              "threshold": 0.2
+            },
+            {
+              "fnr": 0.6,
+              "fpr": 0.25,
+              "precision": 0.6666666666666666,
+              "recall": 0.4,
+              "threshold": 0.3
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.4
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.5
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.6
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.7
+            },
+            {
+              "fnr": 1.0,
+              "fpr": 0.25,
+              "precision": 0.0,
+              "recall": 0.0,
+              "threshold": 0.8
+            }
+          ],
+          "tn": 1,
+          "tp": 5
+        }
+      }
+    }
+  },
+  "scan_outcomes": {
+    "completed": 44,
+    "failed": 5,
+    "submit_error": 5
+  },
+  "sufficiency": {
+    "dataset": {
+      "class_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "family_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "reason": "fewer than 15 usable rows for: benign, known_vulnerable",
+      "rows": 0,
+      "sufficient": false
+    },
+    "lora": {
+      "class_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "family_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "reason": "fewer than 15 usable rows for: benign, known_vulnerable",
+      "rows": 0,
+      "sufficient": false
+    },
+    "model": {
+      "class_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "family_counts": {
+        "benign": 0,
+        "known_vulnerable": 0
+      },
+      "reason": "fewer than 15 usable rows for: benign, known_vulnerable",
+      "rows": 0,
+      "sufficient": false
+    },
+    "software": {
+      "class_counts": {
+        "benign": 20,
+        "known_vulnerable": 24
+      },
+      "family_counts": {
+        "benign": 20,
+        "known_vulnerable": 24
+      },
+      "reason": null,
+      "rows": 44,
+      "sufficient": true
+    }
+  },
+  "usable_rows": 44
+}

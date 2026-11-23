@@ -2,7 +2,57 @@
 
 ## STATUS
 
-_Last updated: 2026-11-19_
+_Last updated: 2026-11-23_
+
+- **Phase 9 (UI/UX redesign, Master Implementation Prompt): 2026-11-23, uncommitted, awaiting owner review.**
+  - Backend: read-only `GET /api/v1/limits` (`app/api/limits.py`, `tests/api/test_limits.py`): upload/artifact size,
+    file count, URL/revision length, allowed hosts, artifact types, sandbox/blockchain provider modes. No secrets,
+    RPC URLs or paths.
+  - New Scan: four workflows (Software package, AI model, Dataset, LoRA adapter) with per-type hints; pre-scan checks in
+    `lib/scanValidation.js` mirror the server's URL, revision and size rules (server still enforces). Unknown limits
+    are stated, never guessed.
+  - Progress dialog: `lib/scanStages.js` (replaces `scanProgress.js`) shows each backend stage with its recorded status;
+    unreported stages are Waiting / Not run / Not reported, never Done; mock stages are labelled.
+  - Risk: `RiskSummaryPanel`, `EvidenceStatusList` (Confirmed vs Signal vs Gap), `EvidenceCompleteness`, `TopFactors`,
+    `RiskLevelBadge` on Scan Details and Risk Analysis; hero shows LOW/MEDIUM/HIGH. Results without `summary`, or
+    legacy (pre-v2) ones, show a note. `BLOCK_MIN_CONFIDENCE` is checked against the backend by a test.
+  - Verified: ruff (CI command) clean; backend 3493 passed, 163 skipped; frontend lint clean, 571 passed, build OK.
+
+- **Phase 7 (risk scoring & explainability, policy v2): 2026-11-23, uncommitted, awaiting owner review.**
+  - `provenancex-policy-v2-handset` (hand-set, uncalibrated): software vs AI weights; a score-only BLOCK below
+    `min_block_confidence` (0.60) or with a required layer missing becomes REVIEW; hard-rule BLOCKs unchanged.
+  - New `app/risk/evidence_status.py` (confirmed_tampering / dangerous_behavior vs known_vulnerability,
+    weak_provenance, integrity_unverified, no_prior_scan, missing_evidence) and `app/risk/summary.py` (`summary` on
+    `/risk`, built at read time; v1-stored decisions still return, marked legacy). No DB migration. Frontend does
+    not show `summary` yet.
+  - Synthetic `ml/reports/fusion_sensitivity.*` re-run for v2. Details: architecture.md "Policy v2".
+  - Verified: ruff clean; backend 3488 passed, 163 skipped; frontend lint clean, 499 passed, build OK.
+
+- **Real-world dataset, Phases 3-4 (scans, training, tests, docs): 2026-11-23, uncommitted, awaiting owner review.**
+  - Scans: 44 of 152 eligible completed (20 benign, 24 known_vulnerable). The NAT64 DNS blocker below is gone (github.com
+    now resolves to IPv4). Remaining scans: GitHub clones stall and the egress proxy cuts idle tunnels at 60 s
+    (`clone_failed`), plus intermittent `dns_resolution_failed`. Owner decision: keep `EGRESS_IDLE_TIMEOUT_SECONDS=60`
+    and retry when the network is stable (`ml/scripts/README.md`).
+  - Gotchas: Docker Desktop's socket is not visible in WSL here, so `make up` uses gid 0 and every scan fails closed with
+    `sandbox_unavailable`. Start with `DOCKER_SOCKET_GID=1001`. Two scan-runner replicas (`--scale scan-runner=2`) work
+    with client `--concurrency 2`.
+  - Training: software model trained on 44 rows (small sample; RF test F1 0.44, 20-split mean 0.69; rules-only 0.62 /
+    0.65). Model, LoRA and dataset have no usable rows and keep the rule-based / REVIEW fallback. Report:
+    `ml/reports/realworld_evaluation_report.md`. Real-world models are not wired into the runtime.
+  - Phase 4 tests: `tests/unit/test_realworld_evaluation.py`, `tests/integration/test_realworld_{train,scan}_script.py`,
+    `tests/security/test_realworld_synthetic_separation.py` (53 tests; no DB or network needed).
+  - Verified: ruff clean; backend 3433 passed, 163 skipped; frontend lint clean, 499 passed, build OK.
+
+- **Real-world dataset, Phase 2 (collection + manifest): implemented 2026-11-22, uncommitted, awaiting owner review.**
+  - Pure: `app/ml/realworld/{manifest,dedup}.py`. Network tooling (outside `app/ml/`, never imported by service code,
+    guarded by `tests/security/test_dataset_collection_isolation.py`): `app/dataset_collection/{collect,scan_client}.py`,
+    `sources/{base,ghsa,osv,nvd,github,huggingface}.py`. Scripts: `ml/scripts/{collect,scan}_realworld.py`.
+  - Manifest `ml/data/realworld/manifest-realworld-v1.jsonl` (tracked; sha256 `5b6938c1...`): 620 records, 607 families.
+    software: 127 known_vulnerable, 25 benign, 27 unknown; package: 296 confirmed_malicious (metadata only);
+    model: 6 benign, 66 unknown; lora: 42 unknown; dataset: 31 unknown; suspicious: 0. Scan-eligible: 152 (all software).
+  - Scan step blocked: on this machine Docker DNS returns a NAT64 address (`64:ff9b::/96`) for github.com, and the egress
+    proxy refuses it as non-public (fail closed). Smoke run: 2 submitted, 2 `clone_failed`. Proxy policy not changed.
+  - Verified: ruff clean; backend `-m "not network and not sandbox"` 3362 passed, 63 skipped.
 
 - **Milestone C3-C5 (audit M6, I1, L9, L11; docs): implemented 2026-11-19, uncommitted, awaiting owner review.**
   Milestone C (C1-C5) is complete; nothing is committed. Overview: [security/verification.md](security/verification.md).

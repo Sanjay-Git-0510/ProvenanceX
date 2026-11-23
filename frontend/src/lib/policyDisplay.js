@@ -1,8 +1,11 @@
-// Display copies of backend policy values. A test compares ALLOW_MIN_CONFIDENCE with
-// min_allow_confidence in backend/app/risk/policy_config.py, because /risk does not return it.
+// Display copies of backend policy values. A test compares them with min_allow_confidence and
+// min_block_confidence in backend/app/risk/policy_config.py, because /risk does not return them.
 import { humanize } from "./format.js";
 
 export const ALLOW_MIN_CONFIDENCE = 0.6;
+export const BLOCK_MIN_CONFIDENCE = 0.6;
+
+export const BLOCK_DOWNGRADE_NOTICE = `A BLOCK from the score alone needs confidence of at least ${BLOCK_MIN_CONFIDENCE.toFixed(2)} and every required layer; otherwise it becomes REVIEW. Hard-rule BLOCKs are never downgraded.`;
 
 export const FLIP_NOTICE = `A decision can flip between scans when confidence crosses ${ALLOW_MIN_CONFIDENCE.toFixed(2)}, even if the artifact has not changed.`;
 

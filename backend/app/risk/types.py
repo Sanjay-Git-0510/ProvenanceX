@@ -118,6 +118,15 @@ class MlSummary(Frozen):
     reliability_notes: list[str] = []
 
 
+class EvidenceItem(Frozen):
+    """One kind of evidence behind a result (see app.risk.evidence_status)."""
+
+    state: str
+    confirmed: bool
+    items: list[str]
+    note: str
+
+
 class RiskAssessment(Frozen):
     risk_score: float | None
     rule_only_score: float | None
@@ -137,6 +146,7 @@ class RiskAssessment(Frozen):
     cvss_max: float | None
     ml: MlSummary
     policy_version: str
+    evidence_status: list[EvidenceItem] = []
 
     @model_validator(mode="after")
     def _allow_is_justified(self) -> "RiskAssessment":

@@ -11,6 +11,14 @@ rule-only score, and ML moves the score only inside that band (see fusion.py). A
 only the model sees therefore does not trigger REVIEW. The reason is measured: on the synthetic
 test split the Random Forest flagged 19 of 26 benign records that had no hash comparison, which
 is the situation of every first scan.
+
+Policy v2 (2026-11-23, still hand-set and uncalibrated):
+- Separate weights for software and AI artifacts (model, lora, dataset), because their threat
+  models differ: an AI artifact's vulnerability layer covers only runtime dependencies, while its
+  AI-specific layer (custom code, serialization, config) carries most of its risk.
+- A BLOCK that comes from the score band alone needs confidence >= min_block_confidence and every
+  required layer scored; otherwise it becomes REVIEW. A BLOCK from a hard rule (confirmed
+  tampering, dangerous pickle globals, sensitive access plus an external destination) stays.
 """
 
 from collections.abc import Mapping
@@ -20,7 +28,7 @@ from types import MappingProxyType
 
 from app.ml.feature_schema import FEATURES, Applies, Layer
 
-POLICY_VERSION = "provenancex-policy-v1-handset"
+POLICY_VERSION = "provenancex-policy-v2-handset"
 ML_UNAVAILABLE_MESSAGE = "ML model unavailable"
 
 
@@ -255,8 +263,9 @@ _HARD_RULES: tuple[HardRule, ...] = (
 
 
 def _default_weights() -> dict[RiskLayer, float]:
+    """Software (and container) weights. Hand-set, not calibrated."""
     return {
-        RiskLayer.VULNERABILITY: 0.20,
+        RiskLayer.VULNERABILITY: 0.25,
         RiskLayer.PROVENANCE: 0.25,
         RiskLayer.GRAPH: 0.10,
         RiskLayer.STATIC: 0.20,
@@ -267,15 +276,31 @@ def _default_weights() -> dict[RiskLayer, float]:
     }
 
 
+def _default_ai_weights() -> dict[RiskLayer, float]:
+    """Model, LoRA and dataset weights. Hand-set, not calibrated."""
+    return {
+        RiskLayer.VULNERABILITY: 0.10,  # runtime dependencies only
+        RiskLayer.PROVENANCE: 0.25,
+        RiskLayer.GRAPH: 0.10,  # lineage
+        RiskLayer.STATIC: 0.20,  # includes pickle opcode analysis
+        RiskLayer.BEHAVIORAL: 0.15,
+        RiskLayer.AI_SPECIFIC: 0.20,
+        RiskLayer.ML_SUPERVISED: 0.15,
+        RiskLayer.ML_ANOMALY: 0.02,
+    }
+
+
 @dataclass(frozen=True)
 class PolicyConfig:
     """Fusion and policy parameters. See the module docstring: hand-set, not validated."""
 
     weights: Mapping[RiskLayer, float] = field(default_factory=_default_weights)
+    weights_ai: Mapping[RiskLayer, float] = field(default_factory=_default_ai_weights)
     max_blend: float = 0.5  # share of the score taken from the highest rule layer
     review_threshold: float = 0.35
     block_threshold: float = 0.70
     min_allow_confidence: float = 0.60
+    min_block_confidence: float = 0.60  # below it, a score-only BLOCK becomes REVIEW
     medium_confidence: float = 0.40
     high_confidence: float = 0.75
     partial_credit: float = 0.5  # coverage credit for a feature whose stage was partial
@@ -299,26 +324,38 @@ class PolicyConfig:
     hard_rules: tuple[HardRule, ...] = _HARD_RULES
 
     def __post_init__(self) -> None:
-        if set(self.weights) != set(RiskLayer):
-            raise ValueError("Every risk layer needs exactly one weight")
-        if any(self.weights[layer] <= 0 for layer in RULE_LAYERS):
-            raise ValueError("Rule layer weights must be positive")
-        if any(self.weights[layer] < 0 for layer in ML_LAYERS):
-            raise ValueError("ML layer weights cannot be negative")
+        for weights in (self.weights, self.weights_ai):
+            if set(weights) != set(RiskLayer):
+                raise ValueError("Every risk layer needs exactly one weight")
+            if any(weights[layer] <= 0 for layer in RULE_LAYERS):
+                raise ValueError("Rule layer weights must be positive")
+            if any(weights[layer] < 0 for layer in ML_LAYERS):
+                raise ValueError("ML layer weights cannot be negative")
         if not 0 <= self.max_blend <= 1:
             raise ValueError("max_blend must be within 0..1")
         if not 0 < self.review_threshold < self.block_threshold <= 1:
             raise ValueError("Thresholds must satisfy 0 < review < block <= 1")
         if not 0 <= self.medium_confidence < self.high_confidence <= 1:
             raise ValueError("Confidence bands must be ordered within 0..1")
-        if not 0 <= self.min_allow_confidence <= 1 or not 0 <= self.partial_credit <= 1:
+        if not all(
+            0 <= v <= 1
+            for v in (self.min_allow_confidence, self.min_block_confidence, self.partial_credit)
+        ):
             raise ValueError("Confidence parameters must be within 0..1")
 
     def required_layers(self, is_ai: bool) -> tuple[RiskLayer, ...]:
         return self.required_ai if is_ai else self.required_software
 
+    def weights_for(self, is_ai: bool) -> Mapping[RiskLayer, float]:
+        return self.weights_ai if is_ai else self.weights
+
     def with_scaled_weight(self, layer: RiskLayer, factor: float) -> "PolicyConfig":
-        return replace(self, weights={**self.weights, layer: self.weights[layer] * factor})
+        """Scale one layer's weight in both the software and the AI profile."""
+        return replace(
+            self,
+            weights={**self.weights, layer: self.weights[layer] * factor},
+            weights_ai={**self.weights_ai, layer: self.weights_ai[layer] * factor},
+        )
 
 
 DEFAULT_POLICY = PolicyConfig()

@@ -3,9 +3,12 @@
 The decision is the strictest of the rule-only score band, the hard rules and the evidence
 gates. An ALLOW needs every required layer scored and confidence at or above the configured
 minimum, and it always states its reason, confidence and the layers that were not evaluated.
+A BLOCK from the score band alone needs the same evidence (min_block_confidence and every
+required layer); otherwise it becomes REVIEW. Hard-rule BLOCKs are never downgraded.
 """
 
 from app.ml.feature_schema import Applies, NullReason
+from app.risk.evidence_status import classify
 from app.risk.fusion import confidence, confidence_label, fuse, required_layers_missing
 from app.risk.layers import build_layers, is_ai, matches, null_reason
 from app.risk.policy_config import (
@@ -132,6 +135,19 @@ def _allow_reason(fusion: FusionResult, value: float, policy: PolicyConfig, miss
     )
 
 
+def _evidence_gaps(
+    inputs: RiskInputs, layers: list[LayerResult], value: float, minimum: float, policy
+) -> list[str]:
+    """Why the evidence is too thin for a score-only decision ([] when it is enough)."""
+    gaps = []
+    missing = required_layers_missing(layers, policy.required_layers(is_ai(inputs)))
+    if missing:
+        gaps.append(f"Required layers were not evaluated: {_layer_names(missing)}")
+    if value < minimum:
+        gaps.append(f"Confidence {value:.2f} is below the minimum {minimum:.2f}")
+    return gaps
+
+
 def _decide(
     inputs: RiskInputs,
     layers: list[LayerResult],
@@ -142,23 +158,31 @@ def _decide(
 ) -> tuple[Decision, str, list[str], str | None]:
     band = _score_decision(fusion.rule_only_score, policy)
     reasons = [f"{rule.rule_id}: {rule.description}" for rule in fired]
-    decision = max([band, *(rule.decision for rule in fired)])
+    hard = max((rule.decision for rule in fired), default=Decision.ALLOW)
+    downgraded = False
+    if band == Decision.BLOCK and hard < Decision.BLOCK:
+        gaps = _evidence_gaps(inputs, layers, value, policy.min_block_confidence, policy)
+        if gaps:
+            band, downgraded = Decision.REVIEW, True
+            reasons.append(
+                f"Rule-only score {fusion.rule_only_score:.3f} is in the BLOCK band, but the "
+                "evidence is too thin for a score-only BLOCK, so the decision is REVIEW"
+            )
+            reasons.extend(gaps)
+    decision = max(band, hard)
     basis = "hard_rule" if fired and decision > band else "score"
+    if downgraded and basis == "score":
+        basis = "insufficient_evidence"
     if fusion.rule_only_score is None:
         reasons.append("No rule layer could be scored, so there is no risk score")
         basis = "insufficient_evidence" if basis == "score" else basis
-    elif band > Decision.ALLOW:
+    elif band > Decision.ALLOW and not downgraded:
         reasons.append(f"Rule-only score {fusion.rule_only_score:.3f} is in the {band.name} band")
     if decision > Decision.ALLOW:
         return decision, basis, reasons, None
-    missing = required_layers_missing(layers, policy.required_layers(is_ai(inputs)))
-    if missing:
-        reasons.append(f"Required layers were not evaluated: {_layer_names(missing)}")
-    if value < policy.min_allow_confidence:
-        reasons.append(
-            f"Confidence {value:.2f} is below the ALLOW minimum {policy.min_allow_confidence:.2f}"
-        )
-    if missing or value < policy.min_allow_confidence:
+    gaps = _evidence_gaps(inputs, layers, value, policy.min_allow_confidence, policy)
+    if gaps:
+        reasons.extend(g.replace("the minimum", "the ALLOW minimum") for g in gaps)
         return Decision.REVIEW, "insufficient_evidence", reasons, None
     not_evaluated = _not_evaluated(layers)
     reason = _allow_reason(fusion, value, policy, not_evaluated)
@@ -199,4 +223,5 @@ def assess_risk(inputs: RiskInputs, policy: PolicyConfig = DEFAULT_POLICY) -> Ri
         cvss_max=float(cvss) if isinstance(cvss, int | float) else None,
         ml=_ml_summary(inputs),
         policy_version=POLICY_VERSION,
+        evidence_status=classify(inputs, layers, fired),
     )

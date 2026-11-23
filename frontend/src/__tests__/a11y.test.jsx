@@ -5,7 +5,18 @@ import { axe, toHaveNoViolations } from "jest-axe";
 import { MemoryRouter } from "react-router-dom";
 import App from "../App.jsx";
 import { routes } from "../routes.js";
-import { SCAN_ID, SHA, evidence, findingsPage, finding, mockApi, riskResult, scanList, scanRow } from "../test/helpers.jsx";
+import {
+  SCAN_ID,
+  SHA,
+  evidence,
+  findingsPage,
+  finding,
+  mockApi,
+  riskResult,
+  riskSummary,
+  scanList,
+  scanRow,
+} from "../test/helpers.jsx";
 
 expect.extend(toHaveNoViolations);
 
@@ -45,7 +56,8 @@ function stubApi() {
     [/\/verify$/, { job_id: "11111111-2222-3333-4444-555555555555", status: "completed", state: verification.state, result: verification }],
     [/\/graph$/, graph],
     [/\/blockchain$/, { anchor_recorded: false, record: null, note: "Stored data only." }],
-    [/\/risk$/, riskResult()],
+    [/\/risk$/, riskResult({ summary: riskSummary() })],
+    [/\/limits$/, { max_upload_mb: 100, max_artifact_files: 20000, sandbox_provider: "disabled", blockchain_provider: "disabled", blockchain_anchor_on_scan: false }],
     [/\/evidence/, evidence()],
     [/\/findings/, findingsPage([finding()])],
     [/\/scans\?/, scanList([scanRow()])],

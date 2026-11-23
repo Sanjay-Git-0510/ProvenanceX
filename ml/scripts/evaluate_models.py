@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate the ProvenanceX models on the SYNTHETIC dataset and write ml/reports/.
+SYNTHETIC DATA: for unit tests, demos and the runtime's current synthetic models only. Real-world
+models are trained by ml/scripts/train_realworld.py and never mix with this data.
 
 Run with the backend virtualenv, after train_models.py:
     backend/.venv/bin/python ml/scripts/evaluate_models.py

@@ -361,6 +361,28 @@ confidence and the layers not evaluated, so a default scan with the sandbox off 
 in that form. Hard rules set a minimum decision and do not alter the score. `hash_changed` from a
 new commit is normal and is not a hard failure; `hash_consistency` and `download_integrity` are.
 
+**Policy v2 (`provenancex-policy-v2-handset`, Phase 7, still hand-set and uncalibrated).**
+- Weights per artifact type. Software and containers: vulnerability 0.25, provenance 0.25,
+  static 0.20, behavioral 0.15, graph 0.10, AI-specific 0.10. AI (model, LoRA, dataset):
+  vulnerability 0.10 (runtime dependencies only), AI-specific 0.20, the rest as software. ML
+  weights are the same for both (supervised 0.15, anomaly 0.02).
+- A BLOCK from the score band alone needs confidence of at least `min_block_confidence` (0.60) and
+  every required layer scored; otherwise it is REVIEW with the reasons stated. Hard-rule BLOCKs
+  are never downgraded.
+- `evidence_status` names the evidence behind each result. Only `confirmed_tampering` (hash
+  contradicts the same commit or the source listing) and `dangerous_behavior` (a hard BLOCK rule
+  on code or behaviour; not proof of intent) are confirmed. `known_vulnerability`,
+  `weak_provenance`, `integrity_unverified` (check status `unknown`), `no_prior_scan` and
+  `missing_evidence` are not; tests check that weak or missing evidence alone never BLOCKs.
+- `/risk` returns a `summary`: score and LOW/MEDIUM/HIGH level, decision and reasons, confidence
+  and evidence completeness, critical findings (fired hard rules), ranked layer contributions with
+  their top signals, SHAP factors when available, missing evidence, and the hand-set and synthetic
+  notes. It is built from the stored result when served. A decision stored by v1 still returns,
+  marked as from an earlier policy; stored decisions are not recomputed.
+- On the synthetic validation split, baseline decisions moved from ALLOW 92 / REVIEW 173 / BLOCK 83
+  (v1) to 95 / 168 / 85 (v2), per `ml/reports/fusion_sensitivity.md`. This is analysis only, not
+  accuracy.
+
 **What an ALLOW does not mean.** An ALLOW can occur without vulnerability or behavioral evidence.
 The behavioral layer is never required, and the sandbox is off by default. The vulnerability layer
 is not required for AI artifacts, and it is skipped when a repository pins no dependencies. The UI

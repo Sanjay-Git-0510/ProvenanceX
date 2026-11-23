@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Generate the SYNTHETIC ProvenanceX feature dataset.
+SYNTHETIC DATA: for unit tests, demos and the runtime's current synthetic models only. Real-world
+models are trained by ml/scripts/train_realworld.py and never mix with this data.
 
 Run from anywhere with the backend virtualenv:
     backend/.venv/bin/python ml/scripts/generate_dataset.py --families 200 --seed 42

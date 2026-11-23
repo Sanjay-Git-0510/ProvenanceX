@@ -434,3 +434,37 @@ def test_api_starts_without_ml_packages():
         [sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True, timeout=60
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_risk_response_has_an_explanation_summary(client):
+    body = _risk(client, _upload(client))
+    summary = body["summary"]
+    assert summary["decision"] == body["decision"]
+    assert summary["risk_score"] == body["risk_score"]
+    assert summary["confidence"] == body["confidence"]
+    assert summary["decision_reasons"] == body["decision_reasons"]
+    assert summary["policy_version"] == "provenancex-policy-v2-handset"
+    assert summary["risk_level"] in {"LOW", "MEDIUM", "HIGH"}
+    assert any("hand-set" in note for note in summary["notes"])
+    assert any("synthetic" in note for note in summary["notes"])
+    for item in summary["evidence_status"]:
+        assert item["state"] and isinstance(item["confirmed"], bool) and item["note"]
+
+
+def test_decision_stored_by_policy_v1_still_returns_with_a_summary(client, session_factory):
+    scan_id = _upload(client)
+    _risk(client, scan_id)
+    with session_factory() as session:
+        stored = session.query(RiskDecision).filter_by(scan_id=uuid.UUID(scan_id)).one()
+        explanation = dict(stored.explanation)
+        assessment = dict(explanation["assessment"])
+        assessment.pop("evidence_status", None)
+        assessment["policy_version"] = "provenancex-policy-v1-handset"
+        explanation["assessment"] = assessment
+        stored.explanation = explanation
+        stored.policy_version = "provenancex-policy-v1-handset"
+        session.commit()
+    body = _risk(client, scan_id)
+    assert body["policy_version"] == "provenancex-policy-v1-handset"
+    assert body["summary"]["confirmed_evidence"] is None
+    assert any("earlier policy" in note for note in body["summary"]["notes"])

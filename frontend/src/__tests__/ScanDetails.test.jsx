@@ -15,6 +15,7 @@ import {
   noRisk,
   renderPage,
   riskResult,
+  riskSummary,
 } from "../test/helpers.jsx";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -48,6 +49,28 @@ describe("Scan Details", () => {
     ]) {
       expect(await screen.findByRole("region", { name })).toBeInTheDocument();
     }
+  });
+
+  it("shows the risk summary, evidence status, completeness and top factors", async () => {
+    open({ risk: riskResult({ summary: riskSummary() }) });
+    const summary = await screen.findByRole("region", { name: "Risk summary" });
+    expect(summary).toHaveTextContent("LOW RISK");
+    expect(summary).toHaveTextContent("No confirmed evidence");
+    expect(summary).toHaveTextContent("trained on synthetic data");
+    expect(summary.closest(".glass")).toBeNull();
+    expect(within(await hero()).getByText("LOW RISK")).toBeInTheDocument();
+    const status = screen.getByRole("region", { name: "Evidence status" });
+    expect(within(status).getByRole("heading", { name: "Signal" })).toBeInTheDocument();
+    expect(within(status).getByRole("heading", { name: "Gap" })).toBeInTheDocument();
+    expect(within(status).queryByRole("heading", { name: "Confirmed" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Evidence completeness" })).toHaveTextContent("Not evaluated");
+    expect(screen.getByRole("region", { name: "Top contributing factors" })).toHaveTextContent("Static");
+  });
+
+  it("keeps the summary panels with a note for a result with no summary", async () => {
+    open();
+    expect(await screen.findByText(/No risk summary is available/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Evidence completeness" })).toHaveTextContent("was not recorded");
   });
 
   it("uses glass on the hero and solid surfaces for hashes", async () => {

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Train the ProvenanceX models on the SYNTHETIC dataset. Reads no test records.
+SYNTHETIC DATA: for unit tests, demos and the runtime's current synthetic models only. Real-world
+models are trained by ml/scripts/train_realworld.py and never mix with this data.
 
 Run with the backend virtualenv, after generate_dataset.py:
     backend/.venv/bin/python ml/scripts/train_models.py --seed 42

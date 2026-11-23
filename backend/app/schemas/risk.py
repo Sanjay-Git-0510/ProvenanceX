@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.db.models import RiskDecision, Scan, ScanStatus
 from app.ml.feature_schema import FeatureValue
 from app.risk.policy_config import FEATURE_LAYERS, RiskLayer
+from app.risk.summary import RiskSummary, build_summary
 from app.risk.types import (
     ConfidenceLabel,
     HardRuleResult,
@@ -261,6 +262,7 @@ class RiskResponse(BaseModel):
     contains_mock_evidence: bool = False
     policy_version: str | None = None
     computed_at: datetime | None = None
+    summary: RiskSummary | None = None
 
     @classmethod
     def without_result(
@@ -308,4 +310,5 @@ class RiskResponse(BaseModel):
             contains_mock_evidence=bool(stored.get("contains_mock_evidence")),
             policy_version=decision.policy_version,
             computed_at=decision.created_at,
+            summary=build_summary(assessment, stored.get("shap")),
         )

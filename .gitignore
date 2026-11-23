@@ -27,6 +27,8 @@ contracts/cache/
 workspace/
 ml/data/*
 !ml/data/.gitkeep
+# Real-world manifest: public metadata only (identifiers, labels, licenses), tracked for reproducibility
+!ml/data/realworld/
 ml/models/*
 !ml/models/.gitkeep
 
@@ -35,3 +37,6 @@ ml/models/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Machine-specific Compose overrides (e.g. local DNS)
+docker-compose.override.yml

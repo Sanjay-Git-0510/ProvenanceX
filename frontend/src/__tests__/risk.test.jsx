@@ -3,14 +3,26 @@ import { join, resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import DecisionDisplay from "../components/risk/DecisionDisplay.jsx";
+import EvidenceCompleteness from "../components/risk/EvidenceCompleteness.jsx";
 import EvidenceLinkList from "../components/risk/EvidenceLinkList.jsx";
+import EvidenceStatusList from "../components/risk/EvidenceStatusList.jsx";
 import HardRules from "../components/risk/HardRules.jsx";
+import RiskLevelBadge from "../components/risk/RiskLevelBadge.jsx";
 import RiskScoreValue from "../components/risk/RiskScoreValue.jsx";
+import RiskSummaryPanel from "../components/risk/RiskSummaryPanel.jsx";
 import SeparateScores from "../components/risk/SeparateScores.jsx";
 import ShapFactors from "../components/risk/ShapFactors.jsx";
+import TopFactors from "../components/risk/TopFactors.jsx";
 import TrainingNotice from "../components/risk/TrainingNotice.jsx";
 import DecisionBadge from "../components/ui/DecisionBadge.jsx";
-import { HOST_PATH, SCAN_ID, expectEveryAllowHasCaveat, noRisk, riskResult } from "../test/helpers.jsx";
+import {
+  HOST_PATH,
+  SCAN_ID,
+  expectEveryAllowHasCaveat,
+  noRisk,
+  riskResult,
+  riskSummary,
+} from "../test/helpers.jsx";
 
 const future = { v7_startTransition: true, v7_relativeSplatPath: true };
 const withRouter = (element) => render(<MemoryRouter future={future}>{element}</MemoryRouter>);
@@ -188,5 +200,97 @@ describe("other risk parts", () => {
       "href",
       `/findings?scan=${SCAN_ID}&category=static`,
     );
+  });
+});
+
+describe("Phase 9 risk summary components", () => {
+  it("shows score, risk level and confidence as words, and says when nothing is confirmed", () => {
+    render(<RiskSummaryPanel summary={riskSummary()} showDecision={false} />);
+    expect(screen.getByText("0.300")).toBeInTheDocument();
+    expect(screen.getByText("LOW RISK")).toBeInTheDocument();
+    expect(screen.getByText(/No confirmed evidence/)).toBeInTheDocument();
+    expect(screen.getByText(/hand-set research parameters/)).toBeInTheDocument();
+    expect(screen.getByText(/trained on synthetic data/)).toBeInTheDocument();
+    expect(screen.getByText(/Hard-rule BLOCKs are never downgraded/)).toBeInTheDocument();
+    expect(screen.getByText("No hard rule fired.")).toBeInTheDocument();
+  });
+
+  it("keeps the ALLOW caveat when it shows the decision", () => {
+    const { container } = render(<RiskSummaryPanel summary={riskSummary()} notEvaluatedLayers={["vulnerability"]} />);
+    expectEveryAllowHasCaveat(container);
+  });
+
+  it("lists critical findings and hard rules that were not evaluated", () => {
+    render(
+      <RiskSummaryPanel
+        showDecision={false}
+        summary={riskSummary({
+          decision: "BLOCK",
+          risk_level: "HIGH",
+          confirmed_evidence: true,
+          critical_findings: [{ rule_id: "dangerous_pickle", decision: "BLOCK", description: `Pickle at ${HOST_PATH}` }],
+          hard_rules_not_evaluated: ["hash_consistency_failed"],
+        })}
+      />,
+    );
+    expect(screen.getByText("HIGH RISK")).toBeInTheDocument();
+    expect(screen.getByText(/Rests on confirmed evidence/)).toBeInTheDocument();
+    expect(screen.getByText("dangerous_pickle")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(HOST_PATH);
+    expect(screen.getByText(/missing evidence, not a pass/)).toHaveTextContent("hash_consistency_failed");
+  });
+
+  it("says so when there is no summary, instead of hiding it", () => {
+    render(<RiskSummaryPanel summary={null} />);
+    expect(screen.getByText(/No risk summary is available/)).toBeInTheDocument();
+  });
+
+  it("shows an unknown or missing risk level in words", () => {
+    render(<RiskLevelBadge level={null} />);
+    expect(screen.getByText("NO RISK LEVEL")).toBeInTheDocument();
+  });
+
+  it("groups confirmed evidence apart from signals and gaps", () => {
+    render(
+      <EvidenceStatusList
+        items={[
+          { state: "missing_evidence", confirmed: false, items: ["sandbox"], note: "Missing evidence." },
+          { state: "dangerous_behavior", confirmed: true, items: ["exec_call"], note: "Not proof of intent." },
+          { state: "known_vulnerability", confirmed: false, items: ["vulnerable_count"], note: "Vulnerable is not malicious." },
+        ]}
+      />,
+    );
+    const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Confirmed", "Signal", "Gap"]);
+    expect(screen.getByText("Dangerous behaviour (not proof of intent)")).toBeInTheDocument();
+    expect(screen.getByText("Known vulnerability")).toBeInTheDocument();
+    expect(screen.getAllByText("Not confirmed")).toHaveLength(2);
+  });
+
+  it("never shows an unknown evidence state as confirmed", () => {
+    render(<EvidenceStatusList items={[{ state: "new_state", confirmed: true, items: [], note: "" }]} />);
+    expect(screen.getByRole("heading", { name: "Gap" })).toBeInTheDocument();
+  });
+
+  it("explains empty and legacy evidence status", () => {
+    const { rerender } = render(<EvidenceStatusList items={[]} legacy />);
+    expect(screen.getByText(/earlier policy/)).toBeInTheDocument();
+    rerender(<EvidenceStatusList items={[]} />);
+    expect(screen.getByText(/No evidence states apply/)).toBeInTheDocument();
+  });
+
+  it("lists completeness per layer, with not evaluated called missing", () => {
+    render(<EvidenceCompleteness completeness={riskSummary().evidence_completeness} />);
+    expect(screen.getByText(/Not evaluated \(missing, not clean\) \(2\)/)).toBeInTheDocument();
+    expect(screen.getByText("Vulnerability, Behavioral")).toBeInTheDocument();
+    expect(screen.getByText("AI-specific")).toBeInTheDocument();
+  });
+
+  it("ranks top factors with their signals", () => {
+    render(<TopFactors factors={riskSummary().top_factors} />);
+    expect(screen.getByRole("cell", { name: "Static" })).toBeInTheDocument();
+    expect(screen.getByText("Script presence = Yes")).toBeInTheDocument();
+    render(<TopFactors factors={[]} />);
+    expect(screen.getByText("No layer added to the score.")).toBeInTheDocument();
   });
 });

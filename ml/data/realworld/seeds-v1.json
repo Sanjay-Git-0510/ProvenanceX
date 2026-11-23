@@ -1,0 +1,362 @@
+{
+  "version": 1,
+  "software": [
+    {
+      "repo": "pallets/flask",
+      "ecosystem": "pip",
+      "package": "flask"
+    },
+    {
+      "repo": "pallets/click",
+      "ecosystem": "pip",
+      "package": "click"
+    },
+    {
+      "repo": "pallets/jinja",
+      "ecosystem": "pip",
+      "package": "jinja2"
+    },
+    {
+      "repo": "pallets/werkzeug",
+      "ecosystem": "pip",
+      "package": "werkzeug"
+    },
+    {
+      "repo": "psf/requests",
+      "ecosystem": "pip",
+      "package": "requests"
+    },
+    {
+      "repo": "psf/black",
+      "ecosystem": "pip",
+      "package": "black"
+    },
+    {
+      "repo": "pydantic/pydantic",
+      "ecosystem": "pip",
+      "package": "pydantic"
+    },
+    {
+      "repo": "fastapi/fastapi",
+      "ecosystem": "pip",
+      "package": "fastapi"
+    },
+    {
+      "repo": "fastapi/typer",
+      "ecosystem": "pip",
+      "package": "typer"
+    },
+    {
+      "repo": "encode/httpx",
+      "ecosystem": "pip",
+      "package": "httpx"
+    },
+    {
+      "repo": "encode/starlette",
+      "ecosystem": "pip",
+      "package": "starlette"
+    },
+    {
+      "repo": "sqlalchemy/sqlalchemy",
+      "ecosystem": "pip",
+      "package": "sqlalchemy"
+    },
+    {
+      "repo": "numpy/numpy",
+      "ecosystem": "pip",
+      "package": "numpy"
+    },
+    {
+      "repo": "pandas-dev/pandas",
+      "ecosystem": "pip",
+      "package": "pandas"
+    },
+    {
+      "repo": "scikit-learn/scikit-learn",
+      "ecosystem": "pip",
+      "package": "scikit-learn"
+    },
+    {
+      "repo": "scipy/scipy",
+      "ecosystem": "pip",
+      "package": "scipy"
+    },
+    {
+      "repo": "matplotlib/matplotlib",
+      "ecosystem": "pip",
+      "package": "matplotlib"
+    },
+    {
+      "repo": "pytest-dev/pytest",
+      "ecosystem": "pip",
+      "package": "pytest"
+    },
+    {
+      "repo": "python-attrs/attrs",
+      "ecosystem": "pip",
+      "package": "attrs"
+    },
+    {
+      "repo": "pypa/pip",
+      "ecosystem": "pip",
+      "package": "pip"
+    },
+    {
+      "repo": "pypa/setuptools",
+      "ecosystem": "pip",
+      "package": "setuptools"
+    },
+    {
+      "repo": "urllib3/urllib3",
+      "ecosystem": "pip",
+      "package": "urllib3"
+    },
+    {
+      "repo": "certifi/python-certifi",
+      "ecosystem": "pip",
+      "package": "certifi"
+    },
+    {
+      "repo": "aio-libs/aiohttp",
+      "ecosystem": "pip",
+      "package": "aiohttp"
+    },
+    {
+      "repo": "django/django",
+      "ecosystem": "pip",
+      "package": "django"
+    },
+    {
+      "repo": "celery/celery",
+      "ecosystem": "pip",
+      "package": "celery"
+    },
+    {
+      "repo": "redis/redis-py",
+      "ecosystem": "pip",
+      "package": "redis"
+    },
+    {
+      "repo": "boto/boto3",
+      "ecosystem": "pip",
+      "package": "boto3"
+    },
+    {
+      "repo": "yaml/pyyaml",
+      "ecosystem": "pip",
+      "package": "pyyaml"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "ecosystem": "pip",
+      "package": "pillow"
+    },
+    {
+      "repo": "tqdm/tqdm",
+      "ecosystem": "pip",
+      "package": "tqdm"
+    },
+    {
+      "repo": "astral-sh/ruff",
+      "ecosystem": "pip",
+      "package": "ruff"
+    },
+    {
+      "repo": "huggingface/transformers",
+      "ecosystem": "pip",
+      "package": "transformers"
+    },
+    {
+      "repo": "huggingface/huggingface_hub",
+      "ecosystem": "pip",
+      "package": "huggingface_hub"
+    },
+    {
+      "repo": "huggingface/safetensors",
+      "ecosystem": "pip",
+      "package": "safetensors"
+    },
+    {
+      "repo": "expressjs/express",
+      "ecosystem": "npm",
+      "package": "express"
+    },
+    {
+      "repo": "lodash/lodash",
+      "ecosystem": "npm",
+      "package": "lodash"
+    },
+    {
+      "repo": "facebook/react",
+      "ecosystem": "npm",
+      "package": "react"
+    },
+    {
+      "repo": "vercel/next.js",
+      "ecosystem": "npm",
+      "package": "next"
+    },
+    {
+      "repo": "axios/axios",
+      "ecosystem": "npm",
+      "package": "axios"
+    },
+    {
+      "repo": "chalk/chalk",
+      "ecosystem": "npm",
+      "package": "chalk"
+    },
+    {
+      "repo": "vitejs/vite",
+      "ecosystem": "npm",
+      "package": "vite"
+    },
+    {
+      "repo": "webpack/webpack",
+      "ecosystem": "npm",
+      "package": "webpack"
+    },
+    {
+      "repo": "eslint/eslint",
+      "ecosystem": "npm",
+      "package": "eslint"
+    },
+    {
+      "repo": "prettier/prettier",
+      "ecosystem": "npm",
+      "package": "prettier"
+    },
+    {
+      "repo": "vuejs/core",
+      "ecosystem": "npm",
+      "package": "vue"
+    },
+    {
+      "repo": "sveltejs/svelte",
+      "ecosystem": "npm",
+      "package": "svelte"
+    },
+    {
+      "repo": "moment/moment",
+      "ecosystem": "npm",
+      "package": "moment"
+    },
+    {
+      "repo": "date-fns/date-fns",
+      "ecosystem": "npm",
+      "package": "date-fns"
+    },
+    {
+      "repo": "jquery/jquery",
+      "ecosystem": "npm",
+      "package": "jquery"
+    },
+    {
+      "repo": "mochajs/mocha",
+      "ecosystem": "npm",
+      "package": "mocha"
+    },
+    {
+      "repo": "jestjs/jest",
+      "ecosystem": "npm",
+      "package": "jest"
+    },
+    {
+      "repo": "microsoft/TypeScript",
+      "ecosystem": "npm",
+      "package": "typescript"
+    },
+    {
+      "repo": "nodejs/undici",
+      "ecosystem": "npm",
+      "package": "undici"
+    },
+    {
+      "repo": "socketio/socket.io",
+      "ecosystem": "npm",
+      "package": "socket.io"
+    },
+    {
+      "repo": "tj/commander.js",
+      "ecosystem": "npm",
+      "package": "commander"
+    },
+    {
+      "repo": "yargs/yargs",
+      "ecosystem": "npm",
+      "package": "yargs"
+    },
+    {
+      "repo": "sindresorhus/got",
+      "ecosystem": "npm",
+      "package": "got"
+    },
+    {
+      "repo": "remix-run/react-router",
+      "ecosystem": "npm",
+      "package": "react-router"
+    },
+    {
+      "repo": "isaacs/node-glob",
+      "ecosystem": "npm",
+      "package": "glob"
+    },
+    {
+      "repo": "npm/node-semver",
+      "ecosystem": "npm",
+      "package": "semver"
+    },
+    {
+      "repo": "uuidjs/uuid",
+      "ecosystem": "npm",
+      "package": "uuid"
+    },
+    {
+      "repo": "motdotla/dotenv",
+      "ecosystem": "npm",
+      "package": "dotenv"
+    }
+  ],
+  "huggingface": {
+    "model_authors": [
+      "google",
+      "microsoft",
+      "sentence-transformers",
+      "BAAI",
+      "intfloat",
+      "FacebookAI",
+      "distilbert",
+      "openai-community",
+      "Qwen",
+      "HuggingFaceTB",
+      "ibm-granite",
+      "prajjwal1"
+    ],
+    "dataset_authors": [
+      "google",
+      "stanfordnlp",
+      "rajpurkar",
+      "allenai",
+      "HuggingFaceH4",
+      "nyu-mll",
+      "ibm"
+    ],
+    "lora_authors": [
+      "ybelkada",
+      "HuggingFaceH4",
+      "smangrul"
+    ],
+    "per_author_limit": 6,
+    "global_lora_limit": 30
+  },
+  "ghsa": {
+    "ecosystems": [
+      "pip",
+      "npm"
+    ],
+    "max_windows": 6,
+    "max_vulnerable_per_ecosystem": 60,
+    "max_malware_per_ecosystem": 150
+  },
+  "nvd_max_lookups": 20
+}

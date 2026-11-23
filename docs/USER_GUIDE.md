@@ -157,12 +157,18 @@ print("  fields:", {f["field"]:f["status"] for f in d["fields"] if f["status"]!=
 
 **In the dashboard (Not run):**
 1. Open <http://localhost:15173> and choose **New Scan**.
-2. Under **Artifact** pick **Software**. Under **Source** pick **Upload ZIP**.
+2. Under **What are you scanning?** pick **Software package**. Under **Source** pick **Upload ZIP**.
 3. In **ZIP file**, choose a ZIP of the files in `backend/tests/fixtures/e2e/software_clean`. The files must be at the
    top level of the ZIP.
 4. Enter a **Display name** and click **Start scan**. You land on **Scan Details**.
-5. The **Timeline** panel lists each stage with its status as the scan runs. The **Artifact identity and integrity**
-   panel shows the hash.
+5. While the scan runs, the progress dialog lists each pipeline stage with the status the backend recorded (Done,
+   Partial, Skipped, Unavailable, Error). A stage not yet reported shows **Waiting**, never Done. After it finishes,
+   the **Timeline** panel lists the same stages and the **Artifact identity and integrity** panel shows the hash.
+
+> **New Scan workflows.** There are four: **Software package** (GitHub URL or ZIP), **AI model**, **Dataset** and
+> **LoRA adapter** (Hugging Face URL or ZIP; a dataset URL must be under `huggingface.co/datasets/`). The form checks
+> the URL shape, revision format and ZIP size before sending, using the limits from `GET /api/v1/limits`. If the
+> limits cannot be loaded, it says so and leaves the size check to the server. The server re-checks everything.
 
 **With curl:**
 
@@ -386,8 +392,14 @@ static finding has no CVSS, because it is a suspicious signal and not a known vu
   vulnerabilities carry a CVSS value, and static or provenance findings do not.
 - **Dependency Graph** (software) or **Model Lineage** (models): choose a scan. Use **Search nodes**, **Node type** and
   **Relation**, and read **Graph features** and **Limitations**. A table below the drawing lists every node and edge.
-- **Risk Analysis**: choose a scan. **Separate measures** shows the four scores, **Evidence layers** the layer
-  breakdown, and **ML factors (SHAP)** the model factors. **Features with no value** lists missing evidence.
+- **Risk Analysis**: choose a scan. **Risk summary** shows the score with its LOW/MEDIUM/HIGH level, confidence,
+  reasons, critical findings (hard rules) and the hand-set and synthetic-data notes. **Evidence status** separates
+  **Confirmed** evidence (tampering, dangerous behaviour) from **Signals** (known vulnerabilities) and **Gaps** (weak
+  provenance, integrity not checked, no prior scan, missing evidence). **Evidence completeness** lists evaluated,
+  partial, not evaluated and not applicable layers, and **Top contributing factors** ranks layers by contribution.
+  **Separate measures** shows the four scores, **Evidence layers** the layer breakdown, and **ML factors (SHAP)** the
+  model factors. **Features with no value** lists missing evidence. A result stored before policy v2 shows a note
+  instead of evidence status. **Scan Details** shows the same summary panels.
 
 You can link straight to a scan, for example `http://localhost:15173/risk?scan=<scan_id>`.
 
@@ -701,6 +713,25 @@ backend/.venv/bin/python ml/scripts/train_models.py --seed 42
 backend/.venv/bin/python ml/scripts/evaluate_models.py
 ```
 
+### Real-world data: retry scans and retrain
+
+Real-world models are separate research models (benign vs known_vulnerable, software only so far).
+They do not replace the runtime models above. Status 2026-11-23: 44 of 152 eligible scans completed.
+
+```bash
+DOCKER_SOCKET_GID=1001 docker compose up -d --scale scan-runner=2
+backend/.venv/bin/python -I ml/scripts/scan_realworld.py --retry-failed --concurrency 2 --per-scan-timeout 1900
+backend/.venv/bin/python -I ml/scripts/train_realworld.py
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every scan fails with `sandbox_unavailable` | The runner cannot use the Docker socket (wrong `DOCKER_SOCKET_GID`) | Restart the runner with the real gid (`stat -c %g` on the socket inside the runner; 1001 here). Scans fail closed, never on the host |
+| Scans fail with `clone_failed` and the proxy logs `idle timeout` | The network stalls GitHub clones for over 60 s | Stop the run and retry later. The proxy timeout is kept at 60 s by owner decision |
+| Report says `fewer than 15 usable rows` | Not enough completed scans for that type | No model is written; that type keeps the rule-based / REVIEW fallback |
+
+Results and caveats: `ml/reports/realworld_evaluation_report.md` and `ml/README.md`.
+
 ## 5. Test commands
 
 Start the demo first, because the Postgres and Hardhat commands below use it instead of a development stack. The
@@ -726,8 +757,9 @@ export DATABASE_URL=postgresql+psycopg://provenancex:provenancex-demo@127.0.0.1:
 | ABI check | `docker run --rm -v "$PWD/backend/app/blockchain/abi.json:/tmp/abi.json:ro" provenancex-hardhat:0.1.0 node scripts/check-abi.js /tmp/abi.json` | The backend's contract interface matches the compiled contract | Matches, 17 entries |
 | End to end | `scripts/run_e2e.sh` (or `make e2e`) | The real API, Postgres, Syft, live OSV, chain, tampering and a live BLOCK through the gate. Uses its own disposable project and ports. Exit 0 passed, 1 failed, 3 NOT RUN | Exit 0 |
 
-None of these tests measures detection accuracy on real attacks. All ML data is synthetic, and there are no real
-malware samples.
+None of these tests measures detection accuracy on real attacks. The runtime models use synthetic data, and there
+are no real malware samples. The separate real-world research models (above) use a small sample of public repositories
+and are not malware detection.
 
 `npm ci` (from the README) was **Not run**, to leave the existing `node_modules` in place. These checks ran on Node 26
 and Python 3.14 on the host. CI uses Node 22 and Python 3.12, and that combination was **Not run**.

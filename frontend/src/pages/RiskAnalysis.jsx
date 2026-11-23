@@ -2,11 +2,15 @@ import { useCallback } from "react";
 import { ArrowUpRight } from "lucide-react";
 import EmptyState from "../components/EmptyState.jsx";
 import DecisionDisplay from "../components/risk/DecisionDisplay.jsx";
+import EvidenceCompleteness from "../components/risk/EvidenceCompleteness.jsx";
 import EvidenceLinkList from "../components/risk/EvidenceLinkList.jsx";
+import EvidenceStatusList from "../components/risk/EvidenceStatusList.jsx";
 import HardRules from "../components/risk/HardRules.jsx";
 import LayerBreakdown from "../components/risk/LayerBreakdown.jsx";
+import RiskSummaryPanel from "../components/risk/RiskSummaryPanel.jsx";
 import SeparateScores from "../components/risk/SeparateScores.jsx";
 import ShapFactors from "../components/risk/ShapFactors.jsx";
+import TopFactors from "../components/risk/TopFactors.jsx";
 import TrainingNotice from "../components/risk/TrainingNotice.jsx";
 import ScanPicker from "../components/scan/ScanPicker.jsx";
 import Button from "../components/ui/Button.jsx";
@@ -16,6 +20,7 @@ import LoadingState from "../components/ui/LoadingState.jsx";
 import Panel from "../components/ui/Panel.jsx";
 import useApi from "../hooks/useApi.js";
 import useScanSelection from "../hooks/useScanSelection.js";
+import { isLegacySummary } from "../lib/evidenceStatus.js";
 import { formatConfidence, humanize } from "../lib/format.js";
 import { FLIP_NOTICE, layerLabel } from "../lib/policyDisplay.js";
 import { sanitizeDisplay } from "../lib/sanitizeDisplay.js";
@@ -42,8 +47,21 @@ function RiskResult({ scanId }) {
   if (!data) return <LoadingState label="Loading the risk result" />;
 
   const notEvaluated = data.explanation?.not_evaluated_features ?? [];
+  const riskSummary = data.summary;
   return (
     <div className="bento">
+      <Panel title="Risk summary" className="span-12">
+        <RiskSummaryPanel summary={riskSummary} notEvaluatedLayers={data.not_evaluated_layers} showDecision={false} />
+      </Panel>
+      <Panel title="Evidence status" eyebrow="Confirmed evidence, signals and gaps" className="span-7">
+        <EvidenceStatusList items={riskSummary?.evidence_status} legacy={isLegacySummary(riskSummary)} />
+      </Panel>
+      <Panel title="Evidence completeness" className="span-5">
+        <EvidenceCompleteness completeness={riskSummary?.evidence_completeness} />
+      </Panel>
+      <Panel title="Top contributing factors" className="span-12">
+        <TopFactors factors={riskSummary?.top_factors} />
+      </Panel>
       <Panel
         title="Decision"
         className="span-4"

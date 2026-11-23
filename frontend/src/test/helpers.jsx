@@ -159,6 +159,41 @@ export function riskResult(overrides = {}) {
   };
 }
 
+/** A /risk `summary` as built by backend/app/risk/summary.py (policy v2). */
+export function riskSummary(overrides = {}) {
+  return {
+    risk_score: 0.3,
+    risk_level: "LOW",
+    decision: "ALLOW",
+    decision_basis: "score_band",
+    decision_reasons: ["Score below the review threshold"],
+    confidence: 0.61,
+    evidence_completeness: {
+      confidence: 0.61,
+      confidence_label: "MEDIUM",
+      evaluated_layers: ["static"],
+      partial_layers: [],
+      not_evaluated_layers: ["vulnerability", "behavioral"],
+      not_applicable_layers: ["ai_specific"],
+    },
+    critical_findings: [],
+    confirmed_evidence: false,
+    top_factors: [
+      { layer: "static", contribution: 0.04, layer_score: 0.2, top_signals: [{ name: "script_presence", value: true, strength: 0.5 }] },
+    ],
+    ml_factors: { status: "unavailable", explains: null, message: "No SHAP explanation was stored", factors: [] },
+    missing_evidence: [{ state: "missing_evidence", confirmed: false, items: ["vulnerability"], note: "Evidence was not collected." }],
+    evidence_status: [
+      { state: "known_vulnerability", confirmed: false, items: ["vulnerable_count"], note: "Vulnerable does not mean malicious." },
+      { state: "missing_evidence", confirmed: false, items: ["vulnerability"], note: "Evidence was not collected." },
+    ],
+    hard_rules_not_evaluated: [],
+    notes: ["Fusion weights and thresholds are hand-set research parameters.", "ML outputs come from models trained on synthetic data."],
+    policy_version: "provenancex-policy-v2-handset",
+    ...overrides,
+  };
+}
+
 export function noRisk(status, code, message) {
   return riskResult({
     status,

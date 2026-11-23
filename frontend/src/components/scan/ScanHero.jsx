@@ -1,6 +1,7 @@
 import { humanize } from "../../lib/format.js";
 import { sanitizeDisplay } from "../../lib/sanitizeDisplay.js";
 import DecisionDisplay from "../risk/DecisionDisplay.jsx";
+import RiskLevelBadge from "../risk/RiskLevelBadge.jsx";
 import RiskScoreValue from "../risk/RiskScoreValue.jsx";
 import MockLabel from "../ui/MockLabel.jsx";
 import ScanStatusBadge from "./ScanStatusBadge.jsx";
@@ -21,11 +22,18 @@ export default function ScanHero({ evidence, risk, riskNote }) {
           {humanize(artifact.artifact_type)} from {humanize(artifact.source)}
         </p>
       </div>
-      <RiskScoreValue
-        value={risk?.risk_score ?? null}
-        pending={pending}
-        reason={risk?.reason?.message || riskNote}
-      />
+      <div>
+        <RiskScoreValue
+          value={risk?.risk_score ?? null}
+          pending={pending}
+          reason={risk?.reason?.message || riskNote}
+        />
+        {risk?.summary ? (
+          <p className="scan-hero__level">
+            <RiskLevelBadge level={risk.summary.risk_level} />
+          </p>
+        ) : null}
+      </div>
       <div className="metric">
         <p className="metric__label">Decision</p>
         <DecisionDisplay

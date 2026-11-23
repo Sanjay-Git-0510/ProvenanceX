@@ -3,8 +3,12 @@ import { useParams } from "react-router-dom";
 import { ArrowUpRight, Blocks, GitFork, Network } from "lucide-react";
 import EmptyState from "../components/EmptyState.jsx";
 import FindingsPreview from "../components/findings/FindingsPreview.jsx";
+import EvidenceCompleteness from "../components/risk/EvidenceCompleteness.jsx";
+import EvidenceStatusList from "../components/risk/EvidenceStatusList.jsx";
+import RiskSummaryPanel from "../components/risk/RiskSummaryPanel.jsx";
 import SeparateScores from "../components/risk/SeparateScores.jsx";
 import ShapFactors from "../components/risk/ShapFactors.jsx";
+import TopFactors from "../components/risk/TopFactors.jsx";
 import TrainingNotice from "../components/risk/TrainingNotice.jsx";
 import ArtifactIdentity from "../components/scan/ArtifactIdentity.jsx";
 import EvidenceSummary from "../components/scan/EvidenceSummary.jsx";
@@ -18,6 +22,7 @@ import Panel from "../components/ui/Panel.jsx";
 import useApi from "../hooks/useApi.js";
 import useScan, { isTerminal } from "../hooks/useScan.js";
 import { isScanId } from "../hooks/useScanSelection.js";
+import { isLegacySummary } from "../lib/evidenceStatus.js";
 import { sanitizeDisplay } from "../lib/sanitizeDisplay.js";
 import { api } from "../services/api.js";
 
@@ -67,6 +72,22 @@ function ScanBody({ scanId, evidence }) {
       ) : null}
       <ProvenancePanel provenance={evidence.provenance} className="span-7" />
       <Timeline stages={evidence.stages} className="span-5" />
+      {risk.data ? (
+        <>
+          <Panel title="Risk summary" className="span-12">
+            <RiskSummaryPanel summary={risk.data.summary} notEvaluatedLayers={risk.data.not_evaluated_layers} showDecision={false} />
+          </Panel>
+          <Panel title="Evidence status" eyebrow="Confirmed evidence, signals and gaps" className="span-7">
+            <EvidenceStatusList items={risk.data.summary?.evidence_status} legacy={isLegacySummary(risk.data.summary)} />
+          </Panel>
+          <Panel title="Evidence completeness" className="span-5">
+            <EvidenceCompleteness completeness={risk.data.summary?.evidence_completeness} />
+          </Panel>
+          <Panel title="Top contributing factors" className="span-12">
+            <TopFactors factors={risk.data.summary?.top_factors} limit={5} />
+          </Panel>
+        </>
+      ) : null}
       {risk.data ? (
         <Panel
           title="Why this score?"

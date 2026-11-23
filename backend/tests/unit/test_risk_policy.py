@@ -292,3 +292,69 @@ def test_high_score_blocks_without_a_hard_rule():
     )
     assert result.decision == "BLOCK"
     assert result.decision_basis == "score"
+
+
+# --- policy v2: a score-only BLOCK needs enough evidence -------------------------------------
+
+_HIGH_SCORE = {
+    "install_hook_count": 2,
+    "archive_anomaly": 1,
+    "dangerous_import_count": 4,
+    "suspicious_api_count": 4,
+    "provenance_removed": True,
+    "source_known": False,
+    "vulnerable_count": 4,
+    "cvss_max": 9.8,
+    "shell_spawn_count": 2,
+    "sensitive_file_access_count": 2,
+}
+
+
+def test_score_block_with_a_missing_required_layer_becomes_review():
+    policy = replace(DEFAULT_POLICY, hard_rules=())
+    evidence = {k: v for k, v in _HIGH_SCORE.items() if k not in ("vulnerable_count", "cvss_max")}
+    result = assess_risk(make_inputs(drop_layers=[RiskLayer.VULNERABILITY], **evidence), policy)
+    assert result.rule_only_score >= policy.block_threshold
+    assert result.decision == "REVIEW"
+    assert result.decision_basis == "insufficient_evidence"
+    text = " ".join(result.reasons)
+    assert "too thin for a score-only BLOCK" in text and "vulnerability" in text
+
+
+def test_score_block_below_min_block_confidence_becomes_review():
+    strict = replace(DEFAULT_POLICY, hard_rules=(), min_block_confidence=0.99)
+    result = assess_risk(make_inputs(drop_layers=[RiskLayer.BEHAVIORAL], **_HIGH_SCORE), strict)
+    assert result.decision == "REVIEW"
+    assert "below the minimum 0.99" in " ".join(result.reasons)
+
+
+def test_score_block_at_exactly_min_block_confidence_stays_block():
+    policy = replace(DEFAULT_POLICY, hard_rules=())
+    inputs = make_inputs(drop_layers=[RiskLayer.BEHAVIORAL], **_HIGH_SCORE)
+    value = assess_risk(inputs, policy).confidence
+    result = assess_risk(inputs, replace(policy, min_block_confidence=value))
+    assert result.decision == "BLOCK" and result.decision_basis == "score"
+
+
+def test_vulnerability_only_evidence_is_review_not_block():
+    only_vuln = [layer for layer in RiskLayer if layer != RiskLayer.VULNERABILITY]
+    result = assess_risk(make_inputs(drop_layers=only_vuln, vulnerable_count=6, cvss_max=10.0))
+    assert result.decision == "REVIEW"
+    assert result.decision != "BLOCK"
+
+
+def test_hard_rule_block_is_never_downgraded_by_low_confidence():
+    checks = [{"name": "hash_consistency", "status": "fail"}]
+    inputs = make_inputs(
+        drop_layers=[RiskLayer.STATIC, RiskLayer.BEHAVIORAL, RiskLayer.GRAPH],
+        hash_changed_same_commit=True,
+        checks=checks,
+    )
+    result = assess_risk(inputs, replace(DEFAULT_POLICY, min_block_confidence=1.0))
+    assert result.decision == "BLOCK" and result.decision_basis == "hard_rule"
+
+
+def test_assessment_carries_policy_v2_and_evidence_status():
+    result = assess_risk(make_inputs(source_known=False))
+    assert result.policy_version == "provenancex-policy-v2-handset"
+    assert [item.state for item in result.evidence_status] == ["weak_provenance"]

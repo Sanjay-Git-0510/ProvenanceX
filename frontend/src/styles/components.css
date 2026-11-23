@@ -598,3 +598,26 @@ button.chip:hover {
     align-items: center;
   }
 }
+
+/* Phase 9: stage rows show their recorded state in words beside the icon. */
+.stepper__label {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stepper__reason {
+  color: var(--text-tertiary);
+  font-size: var(--text-12);
+}
+
+.stepper__state {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
+.stepper__item--partial .stepper__marker {
+  border-color: var(--status-review);
+  color: var(--status-review);
+}

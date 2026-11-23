@@ -72,6 +72,8 @@ function scanForm(fields, file) {
 export const api = {
   health: () => request("/health"),
   ready: () => request("/health/ready"),
+  // Read-only submission limits for pre-scan checks. The server still enforces them.
+  getLimits: ({ signal } = {}) => request("/limits", { signal }),
 
   listScans: ({ limit, offset, status, signal } = {}) =>
     request(`/scans${query({ limit, offset, status })}`, { signal }),

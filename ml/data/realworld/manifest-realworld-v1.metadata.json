@@ -1,0 +1,118 @@
+{
+  "artifact_type_counts": {
+    "dataset": 31,
+    "lora": 42,
+    "model": 72,
+    "package": 296,
+    "software": 179
+  },
+  "data_source_counts": {
+    "ghsa": 423,
+    "github": 52,
+    "huggingface": 145
+  },
+  "dataset_version": "realworld-v1",
+  "family_count": 607,
+  "format": "provenancex-realworld-manifest-v1",
+  "label_counts": {
+    "benign": 31,
+    "confirmed_malicious": 296,
+    "known_vulnerable": 127,
+    "unknown": 166
+  },
+  "license_counts": {
+    "AGPL-3.0": 1,
+    "Apache-2.0": 31,
+    "BSD-2-Clause": 1,
+    "BSD-3-Clause": 15,
+    "CC0-1.0": 2,
+    "GPL-3.0": 1,
+    "ISC": 1,
+    "LGPL-3.0": 1,
+    "MIT": 88,
+    "NOASSERTION": 358,
+    "apache-2.0": 56,
+    "cc-by-3.0": 2,
+    "cc-by-4.0": 3,
+    "cc-by-nc-4.0": 1,
+    "cc-by-nc-sa-4.0": 1,
+    "cc-by-sa-3.0": 1,
+    "cc-by-sa-4.0": 5,
+    "llama2": 3,
+    "mit": 36,
+    "odc-by": 3,
+    "openmdw-1.0": 1,
+    "other": 6,
+    "unknown": 3
+  },
+  "manifest_sha256": "5b6938c1f3475dd3a91bea69d19ea91dcc441f3aedb1a7d09812a92f89b4c53c",
+  "notice": "REAL-WORLD METADATA. Labels come from public advisory databases and published metadata. 'unknown' is not benign and is excluded from training. Benign is criteria-based, not ground truth. confirmed_malicious rows are metadata only: no payload was downloaded, scanned or run.",
+  "parameters": {
+    "collection_date": "2026-11-22",
+    "criteria": {
+      "max_hf_storage_mb": 600,
+      "min_hf_age_days": 180,
+      "min_release_age_days": 180,
+      "min_repo_age_days": 365
+    },
+    "dedup": {
+      "duplicates_removed": 5,
+      "input_count": 625,
+      "label_conflicts": []
+    },
+    "request_count": 1154,
+    "seeds_file": "seeds-v1.json",
+    "seeds_version": 1,
+    "source_errors": [
+      {
+        "error": "GET api.github.com/repos/encode/starlette failed: HTTP 301",
+        "identifier": "encode/starlette",
+        "source": "github"
+      },
+      {
+        "error": "GET api.github.com/repos/huggingface/safetensors failed: HTTP 301",
+        "identifier": "huggingface/safetensors",
+        "source": "github"
+      },
+      {
+        "error": "GET api.github.com/repos/facebook/react failed: HTTP 301",
+        "identifier": "facebook/react",
+        "source": "github"
+      },
+      {
+        "error": "GET api.github.com/repos/rennf93/guard-core/tags failed: HTTP 301",
+        "identifier": "GHSA-gm9r-hvc9-96gv",
+        "source": "ghsa"
+      },
+      {
+        "error": "GET api.github.com/repos/Doist/todoist-mcp/tags failed: HTTP 301",
+        "identifier": "GHSA-833v-v58w-294h",
+        "source": "ghsa"
+      },
+      {
+        "error": "GET api.github.com/repos/The-40-Thieves/obsidian-tc/tags failed: HTTP 301",
+        "identifier": "GHSA-r3g7-r4hr-m258",
+        "source": "ghsa"
+      }
+    ]
+  },
+  "record_count": 620,
+  "scan_eligible_count": 152,
+  "source_licenses": {
+    "ghsa": "CC-BY-4.0 (GitHub Advisory Database)",
+    "github": "GitHub REST API metadata; each repository keeps its own license",
+    "huggingface": "Hugging Face Hub API metadata; each repository keeps its own license",
+    "nvd": "Public NVD data (U.S. government work); NVD terms of use apply",
+    "osv": "CC-BY-4.0 for OSV-native data; each upstream source keeps its own terms"
+  },
+  "type_label_counts": {
+    "dataset/unknown": 31,
+    "lora/unknown": 42,
+    "model/benign": 6,
+    "model/unknown": 66,
+    "package/confirmed_malicious": 296,
+    "software/benign": 25,
+    "software/known_vulnerable": 127,
+    "software/unknown": 27
+  }
+}

@@ -56,3 +56,41 @@ def test_scaled_weight_changes_only_that_weight():
 def test_invalid_parameters_are_refused(change):
     with pytest.raises(ValueError):
         replace(PolicyConfig(), **change)
+
+
+# --- policy v2: per-artifact-type weights ---------------------------------------------------
+
+
+def test_policy_version_says_hand_set():
+    from app.risk.policy_config import POLICY_VERSION
+
+    assert POLICY_VERSION == "provenancex-policy-v2-handset"
+
+
+def test_software_and_ai_weights_differ_where_threat_models_differ():
+    software, ai = DEFAULT_POLICY.weights_for(False), DEFAULT_POLICY.weights_for(True)
+    assert software[RiskLayer.VULNERABILITY] == pytest.approx(0.25)
+    assert ai[RiskLayer.VULNERABILITY] == pytest.approx(0.10)
+    assert ai[RiskLayer.AI_SPECIFIC] == pytest.approx(0.20)
+    assert software[RiskLayer.ML_SUPERVISED] == ai[RiskLayer.ML_SUPERVISED]
+
+
+def test_scaling_a_weight_scales_both_profiles():
+    scaled = DEFAULT_POLICY.with_scaled_weight(RiskLayer.VULNERABILITY, 2.0)
+    assert scaled.weights[RiskLayer.VULNERABILITY] == pytest.approx(0.50)
+    assert scaled.weights_ai[RiskLayer.VULNERABILITY] == pytest.approx(0.20)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"weights_ai": {**DEFAULT_POLICY.weights_ai, RiskLayer.STATIC: 0.0}},
+        {"weights_ai": {k: v for k, v in DEFAULT_POLICY.weights_ai.items() if k != "graph"}},
+        {"min_block_confidence": 1.5},
+    ],
+)
+def test_invalid_v2_parameters_are_refused(change):
+    from dataclasses import replace
+
+    with pytest.raises(ValueError):
+        replace(DEFAULT_POLICY, **change)

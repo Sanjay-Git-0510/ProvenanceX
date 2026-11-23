@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Move each fusion weight by +/-20% and count changed decisions on the validation split.
+SYNTHETIC DATA: for unit tests, demos and the runtime's current synthetic models only. Real-world
+models are trained by ml/scripts/train_realworld.py and never mix with this data.
 
 Analysis only. Nothing is fitted, and test rows are discarded unparsed by the loader.
 

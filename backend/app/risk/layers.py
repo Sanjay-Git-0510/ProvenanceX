@@ -176,7 +176,7 @@ def _rule_layer(
     signals: list[Signal],
     findings: list[FindingRef],
 ) -> LayerResult:
-    weight = policy.weights[layer]
+    weight = policy.weights_for(is_ai(inputs))[layer]
     real = [f for f in findings if f.source != "mock"]
     coverage, any_evaluated, any_partial, not_evaluated = _coverage(inputs, names, policy)
     common: dict[str, Any] = {
@@ -216,7 +216,7 @@ def _ml_layers(inputs: RiskInputs, policy: PolicyConfig) -> list[LayerResult]:
                 status=LayerStatus.EVALUATED if score is not None else LayerStatus.NOT_EVALUATED,
                 score=None if score is None else min(1.0, max(0.0, float(score))),
                 coverage=1.0 if score is not None else 0.0,
-                weight=policy.weights[layer],
+                weight=policy.weights_for(is_ai(inputs))[layer],
             )
         )
     return results

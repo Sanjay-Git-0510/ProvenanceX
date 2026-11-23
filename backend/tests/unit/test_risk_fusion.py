@@ -124,3 +124,16 @@ def test_not_applicable_layers_do_not_lower_confidence():
 )
 def test_confidence_labels(value, label):
     assert confidence_label(value, DEFAULT_POLICY) == label
+
+
+def test_layer_weights_follow_the_artifact_type():
+    from app.risk.policy import assess_risk
+    from tests.risk_helpers import make_inputs
+
+    def weights(kind):
+        return {r.layer: r.weight for r in assess_risk(make_inputs(kind)).layers}
+
+    software, model = weights("software"), weights("model")
+    assert software[RiskLayer.VULNERABILITY] == pytest.approx(0.25)
+    assert model[RiskLayer.VULNERABILITY] == pytest.approx(0.10)
+    assert model[RiskLayer.AI_SPECIFIC] == pytest.approx(0.20)

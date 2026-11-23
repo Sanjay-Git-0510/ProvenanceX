@@ -1,11 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, CircleCheck, CircleX, Clock, LoaderCircle, Play } from "lucide-react";
+import {
+  Check,
+  CircleCheck,
+  CircleDashed,
+  CircleMinus,
+  CircleQuestionMark,
+  CircleX,
+  Clock,
+  LoaderCircle,
+  Play,
+  SkipForward,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { COMPLETE_HOLD_MS, POLL_MS, STEPS, activeStep, formatElapsed } from "../../lib/scanProgress.js";
+import {
+  COMPLETE_HOLD_MS,
+  POLL_MS,
+  STAGE_STATES,
+  formatElapsed,
+  stageStatuses,
+  workflowKind,
+} from "../../lib/scanStages.js";
 import { sanitizeDisplay } from "../../lib/sanitizeDisplay.js";
 import { api } from "../../services/api.js";
 import Badge from "../ui/Badge.jsx";
 import Button from "../ui/Button.jsx";
+import MockLabel from "../ui/MockLabel.jsx";
 import Modal from "../ui/Modal.jsx";
 
 const STATUS_BADGE = {
@@ -15,21 +34,47 @@ const STATUS_BADGE = {
   failed: { tone: "block", icon: CircleX, label: "Failed" },
 };
 
-function Stepper({ active, failed }) {
+const STAGE_ICONS = {
+  done: Check,
+  partial: CircleMinus,
+  skipped: SkipForward,
+  unavailable: CircleQuestionMark,
+  error: CircleX,
+  active: LoaderCircle,
+  pending: null,
+  not_run: CircleDashed,
+  not_reported: CircleQuestionMark,
+};
+
+const STEPPER_CLASS = {
+  done: "done",
+  partial: "partial",
+  error: "failed",
+  active: "active",
+};
+
+/** One row per backend stage, with its recorded status in words and an icon. */
+function StageList({ stages }) {
   return (
-    <ol className="stepper">
-      {STEPS.map((label, index) => {
-        const state = index < active ? "done" : index === active ? (failed ? "failed" : "active") : "pending";
-        const Icon = state === "done" ? Check : state === "failed" ? CircleX : state === "active" ? LoaderCircle : null;
+    <ol className="stepper" aria-label="Scan stages">
+      {stages.map((stage, index) => {
+        const Icon = STAGE_ICONS[stage.state];
+        const variant = STEPPER_CLASS[stage.state] || "pending";
         return (
-          <li key={label} className={`stepper__item stepper__item--${state}`} aria-current={state === "active" ? "step" : undefined}>
+          <li
+            key={stage.key}
+            className={`stepper__item stepper__item--${variant}`}
+            aria-current={stage.state === "active" ? "step" : undefined}
+          >
             <span className="stepper__marker" aria-hidden="true">
-              {Icon ? <Icon size={14} className={state === "active" ? "stepper__spin" : undefined} /> : index + 1}
+              {Icon ? <Icon size={14} className={stage.state === "active" ? "stepper__spin" : undefined} /> : index + 1}
             </span>
-            <span>{label}</span>
-            <span className="sr-only">
-              {state === "done" ? " (done)" : state === "active" ? " (in progress)" : state === "failed" ? " (failed)" : " (waiting)"}
+            <span className="stepper__label">
+              {stage.label}
+              {stage.reason ? <span className="stepper__reason">{sanitizeDisplay(stage.reason)}</span> : null}
             </span>
+            {stage.provider === "mock" ? <MockLabel isMock>MOCK</MockLabel> : null}
+            <span className="stepper__state">{STAGE_STATES[stage.state].label}</span>
           </li>
         );
       })}
@@ -38,10 +83,10 @@ function Stepper({ active, failed }) {
 }
 
 /**
- * Blocks the page while one scan runs. Polls the scan, shows an elapsed timer and the stages,
- * then opens the result. A failed scan keeps the dialog open with Retry and Close.
+ * Blocks the page while one scan runs. Polls the scan, shows an elapsed timer and each stage
+ * as the backend records it, then opens the result. A failed scan keeps the dialog open with Retry and Close.
  */
-export default function ScanProgressModal({ scanId, artifact, onRetry, onClose }) {
+export default function ScanProgressModal({ scanId, artifact, kind, onRetry, onClose }) {
   const navigate = useNavigate();
   const [scan, setScan] = useState(null);
   const [pollError, setPollError] = useState(null);
@@ -135,7 +180,7 @@ export default function ScanProgressModal({ scanId, artifact, onRetry, onClose }
         <p className="scan-progress__timer" aria-label={`Elapsed time ${formatElapsed(elapsed)}`}>
           {formatElapsed(elapsed)}
         </p>
-        <Stepper active={activeStep(scan)} failed={failed} />
+        <StageList stages={stageStatuses(scan, kind || workflowKind(scan?.artifact?.artifact_type))} />
         {failed ? (
           <p className="scan-progress__error" role="alert">
             {sanitizeDisplay(scan.error?.message || "The scan failed.")}
