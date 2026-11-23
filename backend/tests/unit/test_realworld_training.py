@@ -205,7 +205,7 @@ def test_train_evaluate_and_save(tmp_path):
     rf = result["random_forest"]
     assert "brier" in rf["calibration"] and rf["threshold_analysis"]
     assert rf["bootstrap"]["resamples"] == 20
-    manifest = save_models(models, tmp_path / "m", {"synthetic": False})
+    manifest = save_models(models, tmp_path / "m", {"synthetic": False}, {})
     assert manifest["synthetic"] is False
     assert set(manifest["files"]) == {
         "preprocessing.json",
@@ -214,6 +214,7 @@ def test_train_evaluate_and_save(tmp_path):
         "xgboost.json",
         "thresholds.json",
         "training_metadata.json",
+        "evaluation_summary.json",
     }
 
 
@@ -246,3 +247,19 @@ def test_reports_render_without_models():
     }
     assert "gap one" in render_report(results)
     assert "no model was trained" in render_model_card(results)
+
+
+def test_model_card_states_runtime_gate_result():
+    model = {
+        "test": {
+            "random_forest": {"f1": 0.9, "roc_auc": 0.6, "fpr": 1.0, "records": 29},
+            "rules_only": {"f1": 0.9, "fpr": 1.0},
+        },
+        "runtime_gates": {"passed": False, "reasons": ["labelled rows 147 < 150"]},
+    }
+    card = render_model_card({"models": {"software": model}, "evidence_gaps": []})
+    assert "not wired in" not in card
+    assert "software runtime quality gates: fail, not loaded: labelled rows 147 < 150." in card
+    model["runtime_gates"] = {"passed": True, "reasons": []}
+    card = render_model_card({"models": {"software": model}, "evidence_gaps": []})
+    assert "software runtime quality gates: pass, loaded." in card

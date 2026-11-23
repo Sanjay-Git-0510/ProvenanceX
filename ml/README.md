@@ -176,32 +176,45 @@ signed by GitHub's web flow, not only maintainer keys.
 only), so the normal sandboxed runner does the work. At most 200 rows in total; resumable. A row is
 usable for training only if the scan completed with a feature vector and no mock evidence.
 
-**Status (2026-11-23):** 44 of 152 scan-eligible rows completed (20 benign, 24 known_vulnerable).
-The rest are not scanned yet: GitHub clones stall partway and the egress proxy closes idle tunnels
-after 60 s (`EGRESS_IDLE_TIMEOUT_SECONDS`, kept at 60 by owner decision), plus intermittent DNS
-failures. Retry when the network is stable (commands in `ml/scripts/README.md`).
+**Status (2026-11-23, final for manifest v1):** all 152 scan-eligible rows attempted; 147 completed
+(24 benign, 123 known_vulnerable). 5 failed closed on the scan limits and are not retried:
+`artifact_too_large` (microsoft/TypeScript, tsparticles/tsparticles, mlflow/mlflow; 200 MB cap) and
+`too_many_files` (home-assistant/core, nocobase/nocobase; 20 000-file cap). `EGRESS_IDLE_TIMEOUT_SECONDS`
+stays at 60 by owner decision. More rows need a new collection run, not more retries.
 
 **Training (`ml/scripts/train_realworld.py`):** benign vs known_vulnerable, per artifact type,
 family-based splits, thresholds chosen on validation only, test scored once. A type needs ≥ 15
 usable rows per class and ≥ 3 per class in each split; otherwise no model is written and that type
 keeps the rule-based / REVIEW fallback. Outputs: `ml/models/realworld/<type>/` (git-ignored) and
 `ml/reports/realworld_{evaluation_report.md,evaluation_report.json,model_card.md}`. These models are
-research measurements; the runtime keeps the synthetic models, and the synthetic loader refuses a
+research measurements. Software scans load `ml/models/realworld/software` only when its SHA-256
+digests verify and the quality gates in `app/ml/realworld/runtime.py` pass (≥ 150 labelled rows,
+≥ 30 test rows per class, RF test F1 ≥ rules-only, ROC-AUC 95% CI lower bound > 0.5); otherwise they
+fall back to the synthetic models with ML out of the decision band. The synthetic loader refuses a
 real-world model directory.
 
-**Current results (software only, 44 rows; test split = 4 benign + 5 vulnerable):**
+**Current results (software only, 147 rows; test split = 5 benign + 24 vulnerable):**
 
 | Model | F1 | ROC-AUC | PR-AUC | FPR | FNR |
 |---|---|---|---|---|---|
-| Random Forest | 0.44 | 0.53 | 0.56 | 0.50 | 0.60 |
-| XGBoost | 0.77 | 0.78 | 0.79 | 0.75 | 0.00 |
-| Rules-only baseline | 0.62 | 0.33 | 0.48 | 1.00 | 0.20 |
-| Vulnerability-only | 0.00 | 0.38 | 0.56 | 0.25 | 1.00 |
+| Random Forest | 0.89 | 0.63 | 0.87 | 1.00 | 0.04 |
+| XGBoost | 0.92 | 0.85 | 0.97 | 0.80 | 0.00 |
+| Rules-only baseline | 0.89 | 0.54 | 0.84 | 1.00 | 0.04 |
+| Vulnerability-only | 0.76 | 0.73 | 0.93 | 0.40 | 0.33 |
 
-Over 20 re-drawn family splits: Random Forest mean F1 0.69 (std 0.09), rules-only 0.65. RF test F1
-95% CI is [0.0, 0.8]: the sample is too small for firm conclusions.
+High F1 reflects class imbalance (123 vs 24): RF flags all 5 benign test rows (FPR 1.00), like the
+rules-only baseline. Over 20 re-drawn family splits: RF mean F1 0.90 (std 0.02) and mean ROC-AUC
+0.50; rules-only mean F1 0.86. RF test ROC-AUC 95% CI is [0.29, 0.92], so the model does not beat
+chance reliably. **Runtime gates fail** (147 < 150 rows; 5 and 24 test rows per class < 30; CI lower
+bound 0.29 ≤ 0.5): the real-world model is not loaded.
+
+**Policy calibration (`ml/scripts/calibrate_policy.py` → `ml/reports/policy_calibration.{md,json}`):**
+analysis only; `provenancex-policy-v2-handset` is unchanged. Calibrating REVIEW thresholds/weights
+needs ≥ 300 labelled real rows and ≥ 100 per class (have 147; benign 24). Calibrating BLOCK
+additionally needs established ground-truth confirmed_malicious or tampered rows with scan features
+(have 0). On the 147 rows the current policy flags 92% of benign and passes 12% of vulnerable rows.
 
 **Evidence gaps:** model, LoRA and dataset have no usable rows (no model); no malicious-class model
 (metadata only by owner decision); every row is a first scan (comparison features null); behavior
 features null while the dynamic sandbox is off; known_vulnerable is visible in dependency features
-for only 8/24 rows. The full list is in the evaluation report.
+for only 63/123 rows. The full list is in the evaluation report.

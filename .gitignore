@@ -40,3 +40,7 @@ Thumbs.db
 
 # Machine-specific Compose overrides (e.g. local DNS)
 docker-compose.override.yml
+
+# Playwright browser smoke test output
+frontend/test-results/
+frontend/playwright-report/

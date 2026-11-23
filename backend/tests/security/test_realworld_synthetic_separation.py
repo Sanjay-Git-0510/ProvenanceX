@@ -112,6 +112,6 @@ def test_synthetic_loader_refuses_realworld_models(tmp_path):
     rows = make_rows(20, 40)
     parts = with_splits(rows, assign_splits(rows, 42))
     cfg = Config(rf_estimators=5, xgb_estimators=5, iforest_estimators=5)
-    save_models(train(parts["train"], parts["validation"], cfg), tmp_path, {"synthetic": False})
+    save_models(train(parts["train"], parts["validation"], cfg), tmp_path, {"synthetic": False}, {})
     with pytest.raises(ModelArtifactError, match="unknown format"):
         load_bundle(tmp_path)

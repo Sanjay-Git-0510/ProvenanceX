@@ -139,3 +139,34 @@ def test_read_manifest_names_the_bad_line(tmp_path):
     path.write_text(good + "\n\n" + json.dumps(bad) + "\n")
     with pytest.raises(ValueError, match="line 3"):
         read_manifest(path)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/advisories/GHSA-4v6f-7vjh-6x4m",
+        "https://GITHUB.com/Advisories/GHSA-4v6f-7vjh-6x4m",
+        "https://www.github.com/advisories/GHSA-xxxx",
+    ],
+)
+def test_an_advisory_page_is_never_scan_eligible(url):
+    with pytest.raises(ValueError, match="advisory page"):
+        record(
+            label=RealLabel.KNOWN_VULNERABLE,
+            ground_truth_status=GroundTruth.ESTABLISHED,
+            scan_eligible=True,
+            scan_url=url,
+            revision="a" * 40,
+        )
+
+
+def test_an_advisory_source_url_with_a_repo_scan_url_is_allowed():
+    rec = record(
+        label=RealLabel.KNOWN_VULNERABLE,
+        ground_truth_status=GroundTruth.ESTABLISHED,
+        source_url="https://github.com/advisories/GHSA-4v6f-7vjh-6x4m",
+        scan_eligible=True,
+        scan_url="https://github.com/o/r",
+        revision="a" * 40,
+    )
+    assert rec.scan_eligible

@@ -20,6 +20,11 @@ SYNTHETIC_NOTE = (
 GAP_STATES = frozenset(
     {"weak_provenance", "integrity_unverified", "no_prior_scan", "missing_evidence"}
 )
+REALWORLD_NOTE = (
+    "ML outputs come from a model trained on real-world software labelled benign vs "
+    "known_vulnerable, on a small sample. Vulnerable is not malicious, and ML alone cannot "
+    "change the decision."
+)
 LEGACY_NOTE = "This result was stored by an earlier policy; evidence status was not recorded."
 TOP_SIGNALS = 3
 TOP_ML_FACTORS = 5
@@ -132,10 +137,16 @@ def _completeness(assessment: RiskAssessment) -> Completeness:
     )
 
 
-def build_summary(assessment: RiskAssessment, shap: dict[str, Any] | None) -> RiskSummary:
+def build_summary(
+    assessment: RiskAssessment,
+    shap: dict[str, Any] | None,
+    training_data: dict[str, Any] | None = None,
+) -> RiskSummary:
     status = assessment.evidence_status
     legacy = not status and assessment.policy_version != POLICY_VERSION
-    notes = [HANDSET_NOTE, SYNTHETIC_NOTE] + ([LEGACY_NOTE] if legacy else [])
+    realworld = isinstance(training_data, dict) and training_data.get("label") == "real-world"
+    notes = [HANDSET_NOTE, REALWORLD_NOTE if realworld else SYNTHETIC_NOTE]
+    notes += [LEGACY_NOTE] if legacy else []
     return RiskSummary(
         risk_score=assessment.risk_score,
         risk_level=risk_level(assessment.risk_score),

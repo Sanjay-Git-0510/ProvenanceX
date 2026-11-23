@@ -3,7 +3,7 @@ PY := backend/.venv/bin
 # Group that owns the Docker socket, given to the Compose scan-runner (docker-compose.yml).
 export DOCKER_SOCKET_GID ?= $(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)
 
-.PHONY: lock up analyzer-image fetcher-image sandbox-images runner down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
+.PHONY: lock up sandbox-up sandbox-down analyzer-image fetcher-image sandbox-images runner down logs migrate test test-backend test-frontend lint fmt gate e2e demo demo-down
 
 # Regenerate the hash-locked requirement files (audit M6) from backend/requirements*.txt.
 lock:
@@ -24,6 +24,22 @@ sandbox-images: analyzer-image fetcher-image
 
 down:
 	docker compose down
+
+# OPT-IN behavioral sandbox (docker-compose.sandbox.yml). PX_SANDBOX_WORKSPACE must be an absolute
+# path in the Linux filesystem, outside the repository. It is made owned by uid/gid 999 (the
+# containers' non-root user), because the sandbox refuses a root-owned workspace.
+PX_SANDBOX_WORKSPACE ?= $(HOME)/.local/state/provenancex-sandbox-workspace
+SANDBOX_COMPOSE = PX_SANDBOX_WORKSPACE="$(PX_SANDBOX_WORKSPACE)" docker compose -f docker-compose.yml $(if $(wildcard docker-compose.override.yml),-f docker-compose.override.yml,) -f docker-compose.sandbox.yml
+
+sandbox-up: sandbox-images
+	docker compose --profile sandbox-image build sandbox-image
+	@case "$(PX_SANDBOX_WORKSPACE)" in /*) ;; *) echo "PX_SANDBOX_WORKSPACE must be absolute" >&2; exit 2;; esac
+	mkdir -p "$(PX_SANDBOX_WORKSPACE)"
+	docker run --rm --user 0 --network none -v "$(PX_SANDBOX_WORKSPACE):/w" --entrypoint chown provenancex-runner:0.1.0 999:999 /w
+	$(SANDBOX_COMPOSE) up --build -d
+
+sandbox-down:
+	$(SANDBOX_COMPOSE) down
 
 logs:
 	docker compose logs -f

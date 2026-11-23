@@ -38,6 +38,8 @@ from app.risk.model_runtime import (
     ModelUnavailable,
     encode_features,
     load_models,
+    load_realworld_models,
+    realworld_model_dir,
     score_row,
 )
 from app.risk.policy import assess_risk
@@ -56,6 +58,11 @@ _SYNTHETIC_NOTICE = (
     "detection and they make no malware-detection claim."
 )
 _UNVERIFIED_NOTICE = "The saved model metadata does not state that its training data is synthetic."
+_REALWORLD_NOTICE = (
+    "This model was trained on real-world software labelled benign vs known_vulnerable, and it "
+    "passed the quality gates. Vulnerable is not malicious: it makes no malware-detection claim."
+)
+REALWORLD_LABEL = "real-world"
 
 
 def _provenance_document(record: ProvenanceRecord | None) -> dict[str, Any]:
@@ -172,12 +179,41 @@ def _contains_mock(scan: Scan, findings: tuple[FindingRef, ...]) -> bool:
     )
 
 
-def _training_label(models: LoadedModels | None) -> dict[str, Any]:
+def _training_label(
+    models: LoadedModels | None, realworld_note: str | None = None
+) -> dict[str, Any]:
     if models is None:
-        return {"label": "synthetic", "models_used": False, "notice": _NO_MODEL_NOTICE}
-    if models.bundle.metadata.get("synthetic") is True:
-        return {"label": "synthetic", "models_used": True, "notice": _SYNTHETIC_NOTICE}
-    return {"label": "unverified", "models_used": True, "notice": _UNVERIFIED_NOTICE}
+        label = {"label": "synthetic", "models_used": False, "notice": _NO_MODEL_NOTICE}
+    elif models.model_version.startswith("realworld-"):
+        return {"label": REALWORLD_LABEL, "models_used": True, "notice": _REALWORLD_NOTICE}
+    elif models.bundle.metadata.get("synthetic") is True:
+        label = {"label": "synthetic", "models_used": True, "notice": _SYNTHETIC_NOTICE}
+    else:
+        label = {"label": "unverified", "models_used": True, "notice": _UNVERIFIED_NOTICE}
+    if realworld_note:
+        label["notice"] += f" Real-world model not used: {realworld_note}."
+    return label
+
+
+def _select_models(artifact_type: str, settings: Settings) -> tuple[LoadedModels, str | None]:
+    """The gated real-world model for software, else the synthetic models.
+
+    Returns (models, why the real-world model was not used). Raises ModelUnavailable when no
+    model at all can be used.
+    """
+    note = None
+    if artifact_type == "software" and settings.realworld_models_enabled:
+        try:
+            return load_realworld_models(realworld_model_dir(Path(settings.model_path))), None
+        except ModelUnavailable as exc:
+            note = str(exc)
+            logger.info("Real-world software model not used: %s", note)
+    try:
+        return load_models(Path(settings.model_path)), note
+    except ModelUnavailable as exc:
+        raise ModelUnavailable(
+            f"{exc}" + (f"; real-world model not used: {note}" if note else "")
+        ) from exc
 
 
 def _run_models(
@@ -191,7 +227,7 @@ def _run_models(
         reason = f"the models were not trained on artifact type {artifact_type!r}"
         return None, reason, unavailable(f"No explanation: {reason}", plain), _training_label(None)
     try:
-        models = load_models(Path(settings.model_path))
+        models, realworld_note = _select_models(artifact_type, settings)
     except ModelUnavailable as exc:
         return None, str(exc), unavailable(f"No explanation: {exc}", plain), _training_label(None)
     try:
@@ -202,7 +238,7 @@ def _run_models(
         reason = f"scoring failed ({type(exc).__name__})"
         return None, reason, unavailable(f"No explanation: {reason}", plain), _training_label(None)
     shap_result = explain_random_forest(models, row, features, reasons, outputs.rf_risk_probability)
-    return outputs, None, shap_result, _training_label(models)
+    return outputs, None, shap_result, _training_label(models, realworld_note)
 
 
 def _cvss_reason(extraction: FeatureExtraction) -> str | None:

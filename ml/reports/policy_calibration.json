@@ -1,0 +1,648 @@
+{
+  "blend_changes": [
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 1,
+          "REVIEW": 21
+        },
+        "known_vulnerable": {
+          "ALLOW": 16,
+          "BLOCK": 12,
+          "REVIEW": 95
+        }
+      },
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 16,
+      "fnr": 0.13008130081300814,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "max_blend": 0.4,
+      "tn": 2,
+      "tp": 107
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 7,
+          "REVIEW": 15
+        },
+        "known_vulnerable": {
+          "ALLOW": 14,
+          "BLOCK": 40,
+          "REVIEW": 69
+        }
+      },
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 14,
+      "fnr": 0.11382113821138211,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "max_blend": 0.6,
+      "tn": 2,
+      "tp": 109
+    }
+  ],
+  "block_threshold_sweep": [
+    {
+      "block_threshold": 0.5,
+      "score_at_or_above_by_label": {
+        "benign": 15,
+        "known_vulnerable": 80
+      }
+    },
+    {
+      "block_threshold": 0.6,
+      "score_at_or_above_by_label": {
+        "benign": 8,
+        "known_vulnerable": 60
+      }
+    },
+    {
+      "block_threshold": 0.7,
+      "score_at_or_above_by_label": {
+        "benign": 6,
+        "known_vulnerable": 34
+      }
+    },
+    {
+      "block_threshold": 0.8,
+      "score_at_or_above_by_label": {}
+    },
+    {
+      "block_threshold": 0.9,
+      "score_at_or_above_by_label": {}
+    }
+  ],
+  "current_policy": {
+    "block_threshold": 0.7,
+    "bootstrap": {
+      "fnr_95ci": [
+        0.068,
+        0.181
+      ],
+      "fpr_95ci": [
+        0.773,
+        1.0
+      ],
+      "resamples": 1000
+    },
+    "decisions_by_label": {
+      "benign": {
+        "ALLOW": 2,
+        "BLOCK": 5,
+        "REVIEW": 17
+      },
+      "known_vulnerable": {
+        "ALLOW": 15,
+        "BLOCK": 28,
+        "REVIEW": 80
+      }
+    },
+    "flag_means": "decision is REVIEW or BLOCK",
+    "fn": 15,
+    "fnr": 0.12195121951219512,
+    "fp": 22,
+    "fpr": 0.9166666666666666,
+    "review_threshold": 0.35,
+    "tn": 2,
+    "tp": 108
+  },
+  "dataset_version": "realworld-v1",
+  "format": "provenancex-policy-calibration-v1",
+  "label_counts": {
+    "benign": 24,
+    "known_vulnerable": 123
+  },
+  "manifest_sha256": "5b6938c1f3475dd3a91bea69d19ea91dcc441f3aedb1a7d09812a92f89b4c53c",
+  "missing_evidence": {
+    "confidence_max": 0.8045112781954887,
+    "confidence_mean": 0.637977597053859,
+    "confidence_min": 0.38646616541353385,
+    "decisions_by_not_evaluated_layer_count": {
+      "3": {
+        "benign:ALLOW": 2,
+        "benign:BLOCK": 5,
+        "benign:REVIEW": 14,
+        "known_vulnerable:ALLOW": 15,
+        "known_vulnerable:BLOCK": 28,
+        "known_vulnerable:REVIEW": 59
+      },
+      "4": {
+        "benign:REVIEW": 3,
+        "known_vulnerable:REVIEW": 19
+      },
+      "5": {
+        "known_vulnerable:REVIEW": 2
+      }
+    },
+    "hard_rules_not_evaluated": {
+      "archive_anomaly": 20,
+      "critical_known_vulnerability": 74,
+      "external_destination": 147,
+      "hash_consistency_failed": 139,
+      "install_hook_present": 20,
+      "provenance_removed": 139,
+      "sensitive_access_with_external_destination": 147,
+      "shell_spawn": 147
+    },
+    "not_evaluated_layer_counts": {
+      "behavioral": 147,
+      "ml_anomaly": 147,
+      "ml_supervised": 147,
+      "static": 20,
+      "vulnerability": 6
+    },
+    "score_only_block_downgraded_to_review": 7
+  },
+  "policy_version": "provenancex-policy-v2-handset",
+  "review_threshold_sweep": [
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 23,
+      "fpr": 0.9583333333333334,
+      "review_threshold": 0.2,
+      "tn": 1,
+      "tp": 108
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 17,
+      "fnr": 0.13821138211382114,
+      "fp": 23,
+      "fpr": 0.9583333333333334,
+      "review_threshold": 0.25,
+      "tn": 1,
+      "tp": 106
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 19,
+      "fnr": 0.15447154471544716,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "review_threshold": 0.3,
+      "tn": 2,
+      "tp": 104
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 20,
+      "fnr": 0.16260162601626016,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "review_threshold": 0.35,
+      "tn": 2,
+      "tp": 103
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 27,
+      "fnr": 0.21951219512195122,
+      "fp": 19,
+      "fpr": 0.7916666666666666,
+      "review_threshold": 0.4,
+      "tn": 5,
+      "tp": 96
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 39,
+      "fnr": 0.3170731707317073,
+      "fp": 16,
+      "fpr": 0.6666666666666666,
+      "review_threshold": 0.45,
+      "tn": 8,
+      "tp": 84
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 43,
+      "fnr": 0.34959349593495936,
+      "fp": 15,
+      "fpr": 0.625,
+      "review_threshold": 0.5,
+      "tn": 9,
+      "tp": 80
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 56,
+      "fnr": 0.45528455284552843,
+      "fp": 11,
+      "fpr": 0.4583333333333333,
+      "review_threshold": 0.55,
+      "tn": 13,
+      "tp": 67
+    },
+    {
+      "flag_means": "rule-only score >= threshold",
+      "fn": 63,
+      "fnr": 0.5121951219512195,
+      "fp": 8,
+      "fpr": 0.3333333333333333,
+      "review_threshold": 0.6,
+      "tn": 16,
+      "tp": 60
+    }
+  ],
+  "rows": 147,
+  "scan_eligible_in_manifest": 152,
+  "scoring": "rule-only (ML excluded); hard rules needing findings or provenance checks are not evaluated",
+  "sufficiency": {
+    "block_calibration_allowed": false,
+    "missing_for_block": [
+      "153 more labelled real rows (have 147, need 300)",
+      "76 more benign rows (have 24, need 100)",
+      "established ground-truth confirmed_malicious or tampered rows with scan features (have 0)"
+    ],
+    "missing_for_review": [
+      "153 more labelled real rows (have 147, need 300)",
+      "76 more benign rows (have 24, need 100)"
+    ],
+    "review_calibration_allowed": false,
+    "rule": {
+      "block_requires": [
+        "confirmed_malicious",
+        "tampered"
+      ],
+      "min_real_rows": 300,
+      "min_rows_per_class": 100
+    }
+  },
+  "synthetic": false,
+  "weight_changes": [
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 4,
+          "REVIEW": 18
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 23,
+          "REVIEW": 85
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "vulnerability",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 32,
+          "REVIEW": 76
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "vulnerability",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 30,
+          "REVIEW": 78
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "provenance_integrity",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 4,
+          "REVIEW": 18
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 25,
+          "REVIEW": 83
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "provenance_integrity",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 30,
+          "REVIEW": 78
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "graph",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 26,
+          "REVIEW": 82
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "graph",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 27,
+          "REVIEW": 81
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "static",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "static",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "behavioral",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "behavioral",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ai_specific",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ai_specific",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ml_supervised",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ml_supervised",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 0.8,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ml_anomaly",
+      "tn": 2,
+      "tp": 108
+    },
+    {
+      "decisions_by_label": {
+        "benign": {
+          "ALLOW": 2,
+          "BLOCK": 5,
+          "REVIEW": 17
+        },
+        "known_vulnerable": {
+          "ALLOW": 15,
+          "BLOCK": 28,
+          "REVIEW": 80
+        }
+      },
+      "factor": 1.2,
+      "flag_means": "decision is REVIEW or BLOCK",
+      "fn": 15,
+      "fnr": 0.12195121951219512,
+      "fp": 22,
+      "fpr": 0.9166666666666666,
+      "layer": "ml_anomaly",
+      "tn": 2,
+      "tp": 108
+    }
+  ]
+}

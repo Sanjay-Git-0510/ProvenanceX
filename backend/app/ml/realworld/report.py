@@ -154,8 +154,10 @@ def render_model_card(results: dict[str, Any]) -> str:
         "- Task: benign vs known_vulnerable, per artifact type, only where real data suffices.",
         "- Models: Random Forest (primary), XGBoost (comparison), Isolation Forest (fit on benign"
         " train rows only).",
-        "- Runtime: **not wired in**. The API still uses the synthetic models in `ml/models/`"
-        " and keeps ML out of the decision band. These artifacts are research outputs.",
+        "- Runtime: software scans load `ml/models/realworld/software` only when its SHA-256"
+        " digests verify and the quality gates pass (`REALWORLD_MODELS_ENABLED`); otherwise they"
+        " fall back to the synthetic models with ML kept out of the decision band. Model, LoRA,"
+        " dataset and malicious artifacts stay on rules + REVIEW.",
         f"- Artifacts: {', '.join(results['models']) or 'none'} under `ml/models/realworld/`.",
         "",
         "## Results (test split)",
@@ -169,6 +171,13 @@ def render_model_card(results: dict[str, Any]) -> str:
             f" vs rules-only F1 {_fmt(rules['f1'])}, FPR {_fmt(rules['fpr'])}"
             f" (test n={rf['records']})."
         )
+    for kind, r in results["models"].items():
+        g = r.get("runtime_gates")
+        if g is not None:
+            status = (
+                "pass, loaded" if g["passed"] else "fail, not loaded: " + "; ".join(g["reasons"])
+            )
+            out.append(f"- {kind} runtime quality gates: {status}.")
     if not results["models"]:
         out.append("- No artifact type had enough real labelled data; no model was trained.")
     out += ["", "## Not supported", ""] + [f"- {g}" for g in results["evidence_gaps"]]

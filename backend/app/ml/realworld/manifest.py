@@ -101,6 +101,8 @@ class ManifestRecord(BaseModel):
                 raise ValueError(f"{self.label} artifacts must never be scanned")
             if not self.scan_url or not self.revision:
                 raise ValueError("A scan-eligible record needs scan_url and a pinned revision")
+            if _is_advisory_page(self.scan_url):
+                raise ValueError("An advisory page is not a repository and cannot be scanned")
         if self.artifact_type == "package" and self.scan_eligible:
             raise ValueError("Registry packages are metadata only")
         if self.sha256 is None and self.sha256_status == "from_scan":
@@ -108,6 +110,12 @@ class ManifestRecord(BaseModel):
         if self.sha256 is not None and self.sha256_status != "from_scan":
             raise ValueError("A sha256 can only come from a scan")
         return self
+
+
+def _is_advisory_page(url: str) -> bool:
+    """GitHub advisory pages (github.com/advisories/GHSA-...) label data; they are not repos."""
+    path = url.split("://", 1)[-1].lower()
+    return path.startswith(("github.com/advisories/", "www.github.com/advisories/"))
 
 
 def canonical_sha256(value: Any) -> str:

@@ -310,5 +310,5 @@ class RiskResponse(BaseModel):
             contains_mock_evidence=bool(stored.get("contains_mock_evidence")),
             policy_version=decision.policy_version,
             computed_at=decision.created_at,
-            summary=build_summary(assessment, stored.get("shap")),
+            summary=build_summary(assessment, stored.get("shap"), stored.get("training_data")),
         )

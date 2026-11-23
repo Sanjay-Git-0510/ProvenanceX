@@ -682,6 +682,7 @@
 }
 
 .type-picker__option {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
@@ -695,10 +696,14 @@
   transition: border-color var(--motion-fast);
 }
 
+/* Visually hidden but focusable; clipped to the card so it never covers other content. */
 .type-picker__option input {
   position: absolute;
-  opacity: 0;
-  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .type-picker__option:has(input:checked) {

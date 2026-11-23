@@ -4,6 +4,34 @@
 
 _Last updated: 2026-11-23_
 
+- **Remaining-plan wrap-up (scan retry, retrain, calibration, browser/sandbox/restart checks): 2026-11-23,
+  uncommitted, awaiting owner review.**
+  - Scans: all 152 eligible attempted; 147 completed (24 benign, 123 known_vulnerable). 5 failed closed on scan
+    limits and are permanent: `artifact_too_large` (TypeScript, tsparticles, mlflow), `too_many_files`
+    (home-assistant/core, nocobase). `EGRESS_IDLE_TIMEOUT_SECONDS` kept at 60; no stalls this run.
+  - Retrain: software RF test F1 0.885, ROC-AUC 0.633 (95% CI 0.29-0.92), FPR 1.00 on 5 benign test rows; rules-only
+    F1 0.885. Runtime quality gates fail (147 < 150 rows, < 30 test rows per class, CI lower bound ≤ 0.5), so the
+    loader raises `RealWorldUnavailable` and software scans use the synthetic models with ML out of the decision
+    band. Model, LoRA, dataset and malicious stay on rules + REVIEW. The model card now states the gate result
+    (`app/ml/realworld/report.py`, `ml/scripts/train_realworld.py`; test in `test_realworld_training.py`).
+  - Calibration: `ml/reports/policy_calibration.{md,json}` written; `provenancex-policy-v2-handset` unchanged.
+    Not permitted: REVIEW needs ≥ 300 labelled rows and ≥ 100 per class (153 more rows, 76 more benign); BLOCK also
+    needs established confirmed_malicious or tampered rows with features (have 0). The manifest has only 152
+    eligible rows, so this needs a new collection run.
+  - Playwright (`frontend/e2e/smoke.spec.js`, default stack): 7/7 passed after fixing a test locator ("Anchor record"
+    also matched the nested "No anchor recorded" region; now `exact: true`). Verify shows UNKNOWN
+    (`chain_provider_disabled`) because the default stack has `BLOCKCHAIN_PROVIDER=disabled`.
+  - Sandbox override: `make sandbox-up`, one live upload scan (`simple_python_project`): completed, REVIEW; sandbox
+    stage `partial` (provider docker, exit 0, no targets, "no syscalls were recorded", behavior features null),
+    then `make sandbox-down`.
+  - Docker Desktop restart: `docker_restart_pre.sh` PASS. First `docker_restart_post.sh` run FAILED: the fresh
+    GitHub scan failed at `staging` with `sandbox_unavailable` and verify_e2e.py crashed on the missing `sbom`
+    stage (its in-flight-scan checks scrolled off; cause not investigated). A second run passed 48/48, including
+    in-flight scan `runner_interrupted`, holder/fetcher/staging volume/workspace removed. Open question: whether the
+    runner auto-started by Docker Desktop needs a recreate before it can reach Docker; repeat the pre/restart/post
+    cycle to confirm.
+  - Verified: ruff clean (388 files); backend 3550 passed, 163 skipped; frontend lint clean, Vitest 571 passed, build OK.
+
 - **Phase 9 (UI/UX redesign, Master Implementation Prompt): 2026-11-23, uncommitted, awaiting owner review.**
   - Backend: read-only `GET /api/v1/limits` (`app/api/limits.py`, `tests/api/test_limits.py`): upload/artifact size,
     file count, URL/revision length, allowed hosts, artifact types, sandbox/blockchain provider modes. No secrets,

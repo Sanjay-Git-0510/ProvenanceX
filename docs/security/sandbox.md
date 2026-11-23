@@ -192,7 +192,11 @@ self-check results, exit code, OOM and timeout flags, and duration. Failed runs 
   re-hashes in a read-only `rehash` container ([verification.md](verification.md)).
   `test_host_side_code_never_calls_content_functions` now has no exceptions.
 - **Behavioral (dynamic) analysis** (`SANDBOX_PROVIDER`) is a separate, optional evidence layer. It
-  supports only bind mounts, so it stays `disabled` in Compose for now. Turning it off does not
-  disable the analyzer.
+  supports only bind mounts, so it stays `disabled` in the default Compose stack. Turning it off
+  does not disable the analyzer. **Opt-in:** `make sandbox-up` adds `docker-compose.sandbox.yml`,
+  which gives the api and scan-runner a host workspace directory mounted at the same absolute path
+  (owned by uid 999, outside the repo) and sets `SANDBOX_PROVIDER=docker` and
+  `ANALYZER_WORKSPACE_MOUNT=bind`. The sandbox hardening is unchanged. Trade-off: untrusted
+  artifacts then live in a host directory instead of a Docker-managed volume.
 - **ML dataset generation** (`ml/scripts`) still parses the committed benign fixtures directly. It
   never touches scanned artifacts.

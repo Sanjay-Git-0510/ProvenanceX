@@ -76,6 +76,8 @@ backend/.venv/bin/python -I ml/scripts/scan_realworld.py --retry-failed --concur
 - `--per-scan-timeout` only stops waiting; the runner's own ceiling is `RUNNER_MAX_SCAN_SECONDS`
   (1800 s).
 - Stop the run if every new scan fails (e.g. `clone_failed` from network stalls) and retry later.
+- `artifact_too_large` and `too_many_files` are permanent (scan limits, fail closed); retrying them
+  only repeats the failure. Manifest v1 has 5 such rows.
 
 Then train and evaluate (offline; never reads the synthetic dataset):
 
@@ -84,4 +86,15 @@ backend/.venv/bin/python -I ml/scripts/train_realworld.py
 ```
 
 Writes `ml/models/realworld/<type>/` only for types with enough data, and the
-`ml/reports/realworld_*` reports.
+`ml/reports/realworld_*` reports. The model card states whether the runtime quality gates pass, i.e.
+whether software scans will load the model.
+
+Policy calibration analysis (offline, analysis only, never changes the policy):
+
+```bash
+backend/.venv/bin/python -I ml/scripts/calibrate_policy.py
+```
+
+Writes `ml/reports/policy_calibration.{md,json}`: the current policy measured on real rows, threshold
+sweeps, and whether calibration is permitted yet (≥ 300 labelled rows, ≥ 100 per class; BLOCK also
+needs established confirmed_malicious or tampered rows).

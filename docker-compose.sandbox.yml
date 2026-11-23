@@ -1,0 +1,35 @@
+# OPT-IN: behavioral (dynamic) sandbox in Compose. The default stack keeps SANDBOX_PROVIDER=disabled.
+#
+#   make sandbox-up        # prepares the workspace directory, then starts the stack with this file
+#
+# The behavioral sandbox mounts the artifact by host path (bind mount). Inside Compose the default
+# workspace is a named volume, which has no host path, so this override replaces the workspace of
+# the api and scan-runner with a host directory mounted at the SAME absolute path inside the
+# containers. Paths the runner passes to `docker run` then exist on the host. Nothing in the
+# sandbox hardening changes: the sandbox still runs with no network, a read-only artifact mount, a
+# non-root user, cap-drop ALL, no-new-privileges, pids/memory/CPU limits, a hard timeout and no
+# Docker socket.
+#
+# Trade-offs (why this is not the default):
+# - Untrusted artifacts are kept in a host directory, not a Docker-managed volume. Keep it in the
+#   Linux filesystem (WSL), outside the repository, owned by the containers' non-root uid (999).
+# - The analyzer also uses bind mode here, for the same reason (ANALYZER_WORKSPACE_MOUNT=bind).
+# Stop with `make sandbox-down`. The directory keeps untrusted data until you remove it yourself.
+services:
+  api:
+    environment:
+      WORKSPACE_ROOT: ${PX_SANDBOX_WORKSPACE:?set PX_SANDBOX_WORKSPACE to an absolute host directory}
+    volumes:
+      - type: bind
+        source: ${PX_SANDBOX_WORKSPACE}
+        target: ${PX_SANDBOX_WORKSPACE}
+
+  scan-runner:
+    environment:
+      WORKSPACE_ROOT: ${PX_SANDBOX_WORKSPACE}
+      ANALYZER_WORKSPACE_MOUNT: bind
+      SANDBOX_PROVIDER: docker
+    volumes:
+      - type: bind
+        source: ${PX_SANDBOX_WORKSPACE}
+        target: ${PX_SANDBOX_WORKSPACE}

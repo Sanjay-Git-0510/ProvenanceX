@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     sandbox_spike_cpu_fraction: float = Field(default=0.9, gt=0, le=1)
     sandbox_spike_cpu_min_intervals: int = Field(default=3, gt=0)
     model_path: Path = Path("./ml/models")
+    # Use the real-world software model (MODEL_PATH/realworld/software) for software scans, but
+    # only when its digests verify and its quality gates pass; otherwise the synthetic models or
+    # the rule-based result are used and the reason is stated. False never tries it.
+    realworld_models_enabled: bool = True
 
     # --- Content analysis (master prompt Phase 1). Every step that reads untrusted artifact
     # content (extraction, tree hashing, manifests, Syft, AI-BOM, pickle/safetensors parsing,

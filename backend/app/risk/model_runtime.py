@@ -61,6 +61,41 @@ def load_models(model_dir: Path) -> LoadedModels:
         return models
 
 
+def realworld_model_dir(model_path: Path) -> Path:
+    """The real-world software bundle lives under the models directory (mounted read-only)."""
+    return model_path / "realworld" / "software"
+
+
+def load_realworld_models(model_dir: Path) -> LoadedModels:
+    """The gated real-world software model, verified like load_models. Raises ModelUnavailable.
+
+    Re-verifies on every call whose manifest changed; a refusal is never cached as a success.
+    """
+    try:
+        from app.ml.realworld.runtime import RealWorldUnavailable, load_realworld_software
+    except ImportError as exc:
+        raise ModelUnavailable("the ML packages are not installed") from exc
+
+    key = model_dir.resolve()
+    with _lock:
+        try:
+            manifest_raw = (model_dir / "manifest.json").read_bytes()
+        except OSError as exc:
+            raise ModelUnavailable("no real-world software model is installed") from exc
+        cached = _cache.get(key)
+        if cached is not None and cached[0] == manifest_raw:
+            return cached[1]
+        try:
+            bundle = load_realworld_software(model_dir)
+        except RealWorldUnavailable as exc:
+            raise ModelUnavailable(str(exc)) from exc
+        files = bundle.metadata["manifest_files"]
+        version = "realworld-" + model_version(files).removeprefix("models-")
+        models = LoadedModels(bundle=bundle, model_version=version)
+        _cache[key] = (manifest_raw, models)
+        return models
+
+
 def model_version(files: Mapping[str, Any]) -> str:
     """A version that changes when any model, threshold or preprocessing file changes."""
     digests = {name: entry.get("sha256") for name, entry in sorted(files.items())}

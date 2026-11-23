@@ -318,8 +318,24 @@ def _json(value: Any) -> bytes:
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
 
 
-def save_models(models: Trained, out_dir: Path, metadata: dict[str, Any]) -> dict[str, Any]:
-    """Write models, preprocessing and thresholds, then a manifest of SHA-256 digests last."""
+def evaluation_summary(report: dict[str, Any], labelled_rows: int) -> dict[str, Any]:
+    """The numbers the runtime quality gates read (app.ml.realworld.runtime.evaluate_gates)."""
+    rf, rules = report["test"]["random_forest"], report["test"]["rules_only"]
+    return {
+        "labelled_rows": labelled_rows,
+        "test_class_counts": dict(report["split_counts"].get("test", {})),
+        "test_f1": rf.get("f1"),
+        "rules_only_test_f1": rules.get("f1"),
+        "test_roc_auc_95ci": rf.get("bootstrap", {}).get("roc_auc_95ci"),
+        "note": "Measured on the held-out real-world test split. The runtime recomputes the gates.",
+    }
+
+
+def save_models(
+    models: Trained, out_dir: Path, metadata: dict[str, Any], evaluation: dict[str, Any]
+) -> dict[str, Any]:
+    """Write models, preprocessing, thresholds and the evaluation summary, then a manifest of
+    SHA-256 digests last, so the summary the runtime gates read is digest-covered."""
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "manifest.json").unlink(missing_ok=True)
     contents = {
@@ -331,6 +347,7 @@ def save_models(models: Trained, out_dir: Path, metadata: dict[str, Any]) -> dic
             {k: v.model_dump(mode="json") for k, v in models.thresholds.items()}
         ),
         "training_metadata.json": _json({"format": MODELS_FORMAT, **metadata}),
+        "evaluation_summary.json": _json(evaluation),
     }
     for name, raw in contents.items():
         (out_dir / name).write_bytes(raw)

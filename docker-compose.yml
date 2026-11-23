@@ -180,6 +180,8 @@ services:
       SANDBOX_SPIKE_CPU_MIN_INTERVALS: ${SANDBOX_SPIKE_CPU_MIN_INTERVALS:-3}
       # Fixed path inside the container: the host's ml/models, mounted read-only.
       MODEL_PATH: /app/ml/models
+      # Real-world software model: used only when its digests verify and its gates pass.
+      REALWORLD_MODELS_ENABLED: ${REALWORLD_MODELS_ENABLED:-true}
       BLOCKCHAIN_PROVIDER: ${BLOCKCHAIN_PROVIDER:-disabled}
       BLOCKCHAIN_ANCHOR_ON_SCAN: ${BLOCKCHAIN_ANCHOR_ON_SCAN:-false}
       BLOCKCHAIN_TIMEOUT_SECONDS: ${BLOCKCHAIN_TIMEOUT_SECONDS:-30}

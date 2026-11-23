@@ -131,7 +131,7 @@ def test_ablation_has_one_entry_per_layer(trained):
 
 def test_saved_models_reload_with_same_scores(trained, tmp_path):
     parts, models = trained
-    manifest = save_models(models, tmp_path, {"synthetic": False})
+    manifest = save_models(models, tmp_path, {"synthetic": False}, {})
     raw = {name: (tmp_path / name).read_bytes() for name in manifest["files"]}
     for name, entry in manifest["files"].items():
         assert hashlib.sha256(raw[name]).hexdigest() == entry["sha256"]

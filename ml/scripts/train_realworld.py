@@ -27,10 +27,12 @@ from app.ml.realworld.dataset import (  # noqa: E402
 )
 from app.ml.realworld.manifest import DATASET_VERSION, read_manifest  # noqa: E402
 from app.ml.realworld.report import render_model_card, render_report  # noqa: E402
+from app.ml.realworld.runtime import evaluate_gates  # noqa: E402
 from app.ml.realworld.train_eval import (  # noqa: E402
     Config,
     ablation,
     evaluate_split,
+    evaluation_summary,
     repeated_splits,
     save_models,
     top_features,
@@ -115,7 +117,10 @@ def main() -> int:
                 "split_counts": report["split_counts"],
                 "train_record_ids": sorted(r.record_id for r in parts["train"]),
             },
+            evaluation_summary(report, len(rows)),
         )
+        gates = evaluate_gates(evaluation_summary(report, len(rows)))
+        report["runtime_gates"] = {"passed": gates.passed, "reasons": list(gates.reasons)}
         results["models"][kind] = report
 
     by_type = Counter((r.artifact_type, str(r.label)) for r in manifest)
