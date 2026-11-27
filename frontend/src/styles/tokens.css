@@ -71,8 +71,8 @@
 
   /* Radii */
   --radius-pill: 9999px;
-  --radius-card: 2rem;
-  --radius-card-sm: 1.25rem;
+  --radius-card: 0.75rem;
+  --radius-card-sm: 0.75rem;
   --radius-control: 0.875rem;
 
   /* Elevation: hairlines do the work; shadows only on floating layers. */
