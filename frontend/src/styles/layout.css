@@ -17,9 +17,9 @@
   transform: none;
 }
 
-/* Glass is opt-in: solid first, frosted only when supported and wanted. */
+/* Glass is opt-in: solid canvas first, frosted only when supported and wanted. */
 .glass {
-  background: var(--surface-1);
+  background: var(--surface-0);
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
@@ -32,7 +32,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .glass {
-    background: var(--surface-1);
+    background: var(--surface-0);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -93,7 +93,8 @@
   z-index: 30;
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
-  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  background: var(--surface-0);
   opacity: 0;
   visibility: hidden;
   transform: translateY(-8px);

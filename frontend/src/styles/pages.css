@@ -302,6 +302,11 @@
   min-width: 62rem;
 }
 
+/* Separate the right-aligned Risk column from the left-aligned Decision column. */
+.recent-scans .table--compact .is-end {
+  padding-right: var(--space-3);
+}
+
 .count-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
