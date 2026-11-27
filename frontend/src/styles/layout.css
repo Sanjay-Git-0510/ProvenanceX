@@ -144,9 +144,9 @@
 }
 
 .rail__link.active {
-  background: var(--surface-3);
-  color: var(--text-primary);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .app-main {

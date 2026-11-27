@@ -35,13 +35,14 @@
 }
 
 .button--secondary {
-  border-color: var(--line-control);
-  background: var(--surface-2);
+  border-color: var(--line-strong);
+  background: var(--surface-1);
   color: var(--text-primary);
 }
 
 .button--secondary:hover:not(:disabled) {
-  background: var(--surface-3);
+  border-color: var(--line-control);
+  background: var(--surface-2);
 }
 
 .button--ghost {
@@ -66,7 +67,7 @@
   gap: var(--space-1);
   min-height: 2.5rem;
   padding: var(--space-half) var(--space-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   color: var(--text-secondary);
   font-size: var(--text-12);
@@ -152,7 +153,7 @@ button.chip:hover {
   outline-offset: -1px;
 }
 
-/* Panels: three solid levels so the page never reads as one uniform card grid. */
+/* Panels: white cards lift off the canvas; levels 2 and 3 recess, so they carry no shadow. */
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-card-sm);
@@ -161,17 +162,15 @@ button.chip:hover {
 
 .panel--level-1 {
   background: var(--surface-1);
-  box-shadow: var(--elevation-1);
+  box-shadow: var(--elevation-2);
 }
 
 .panel--level-2 {
   background: var(--surface-2);
-  box-shadow: var(--elevation-2);
 }
 
 .panel--level-3 {
   background: var(--surface-3);
-  box-shadow: var(--elevation-2);
 }
 
 .panel__head {
@@ -213,6 +212,7 @@ button.chip:hover {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-14);
+  font-variant-numeric: tabular-nums;
 }
 
 .table caption {
@@ -225,6 +225,7 @@ button.chip:hover {
 .table th {
   padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
   color: var(--text-tertiary);
   font-size: var(--text-12);
   font-weight: 500;
@@ -235,7 +236,7 @@ button.chip:hover {
 }
 
 .table td {
-  padding: var(--space-1) var(--space-2);
+  padding: calc(var(--space-1) + var(--space-half)) var(--space-2);
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -249,7 +250,7 @@ button.chip:hover {
 }
 
 .table tbody tr:hover {
-  background: var(--surface-2);
+  background: var(--surface-0);
 }
 
 .table .is-end {
@@ -344,6 +345,11 @@ button.chip:hover {
 }
 
 .hash__value {
+  padding: var(--space-half) var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--space-1);
+  background: var(--surface-2);
+  color: var(--text-primary);
   font-size: var(--text-12);
   overflow-wrap: anywhere;
 }
@@ -398,7 +404,7 @@ button.chip:hover {
   padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: var(--surface-2);
+  background: var(--surface-1);
   box-shadow: var(--elevation-3);
 }
 
@@ -415,12 +421,15 @@ button.chip:hover {
   width: 2.5rem;
   height: 2.5rem;
   border-radius: var(--radius-pill);
-  background: var(--surface-3);
+  background: var(--surface-2);
   color: var(--text-secondary);
-  transition: color var(--motion-fast) var(--ease-out);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .modal__close:hover {
+  background: var(--surface-3);
   color: var(--text-primary);
 }
 

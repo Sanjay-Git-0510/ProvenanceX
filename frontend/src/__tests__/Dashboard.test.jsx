@@ -109,8 +109,13 @@ describe("Dashboard", () => {
     const rows = container.querySelectorAll(".summary-row");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("ALLOW1");
-    expect(rows[0]).toHaveTextContent("Confidence: 0.61");
-    expect(rows[0]).toHaveTextContent("Not evaluated: listed on each scan");
+    // The ALLOW caveat sits below all three bars, under a divider, inside the same caveat container.
+    const note = container.querySelector(".decision-summary__note");
+    expect(note.closest('[data-allow="true"]')).toBe(container.querySelector(".decision-summary"));
+    expect(note.previousElementSibling).toHaveClass("summary-list");
+    expect(note).toHaveTextContent("Confidence: 0.61");
+    expect(note).toHaveTextContent("Not evaluated: listed on each scan");
+    expectEveryAllowHasCaveat(container);
   });
 
   it("lists findings for REVIEW and BLOCK scans only", async () => {

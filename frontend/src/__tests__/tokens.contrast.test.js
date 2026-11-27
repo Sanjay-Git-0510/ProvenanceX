@@ -62,19 +62,27 @@ describe("WCAG AA contrast on actual backgrounds", () => {
     expect(contrast(token("accent").rgb, token(bg).rgb)).toBeGreaterThanOrEqual(3);
   });
 
-  // The worst case for glass is the lightest page content scrolling behind it.
+  // The worst case for light glass is the darkest page content (ink text) scrolling behind it.
   it.each(["text-primary", "text-secondary", "status-allow", "status-review", "status-block"])(
-    "%s stays readable on glass over the lightest backdrop",
+    "%s stays readable on glass over the darkest backdrop",
     (fg) => {
       const glass = composite(token("glass-fill"), token("text-primary"));
       expect(contrast(token(fg).rgb, glass)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
-  it("surfaces get steadily lighter", () => {
-    const levels = SURFACES.map((name) => luminance(token(name).rgb));
-    expect(levels).toEqual([...levels].sort((a, b) => a - b));
-    expect(new Set(levels).size).toBe(SURFACES.length);
+  // Light theme: white cards (surface-1) lift off the off-white canvas (surface-0);
+  // surface-2 (recessed) and surface-3 (hover/active) step darker than the canvas.
+  it("orders surfaces as card > canvas > recessed > active", () => {
+    const lum = (name) => luminance(token(name).rgb);
+    expect(lum("surface-1")).toBeGreaterThan(lum("surface-0"));
+    expect(lum("surface-0")).toBeGreaterThan(lum("surface-2"));
+    expect(lum("surface-2")).toBeGreaterThan(lum("surface-3"));
+  });
+
+  it("uses translucent ink hairlines for borders", () => {
+    expect(token("line").alpha).toBeLessThan(token("line-strong").alpha);
+    expect(token("line").alpha).toBeLessThanOrEqual(0.1);
   });
 });
 

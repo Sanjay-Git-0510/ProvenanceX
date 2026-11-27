@@ -78,7 +78,7 @@ function LatestScanPanels() {
           ),
         )}
       </Panel>
-      <Panel title="Latest REVIEW and BLOCK findings" eyebrow="Highest CVSS first" className="span-12">
+      <Panel title="Latest REVIEW and BLOCK findings" eyebrow="Highest CVSS first" className="span-8">
         {body(<AttentionFindings scans={items} />)}
       </Panel>
     </>
@@ -98,7 +98,7 @@ export default function Dashboard() {
         <div className="span-12">
           <ScanCounts />
         </div>
-        <Panel title="Recent scans" className="span-8">
+        <Panel title="Recent scans" className="span-12 recent-scans">
           <RecentScans />
         </Panel>
         <LatestScanPanels />

@@ -16,10 +16,10 @@ function confidenceRange(scans) {
   return low === high ? low : `${low} to ${high}`;
 }
 
-function Row({ row, count, total, children }) {
+function Row({ row, count, total }) {
   const width = total > 0 ? (count / total) * 100 : 0;
   return (
-    <li className="summary-row" data-allow={row.key === "ALLOW" ? "true" : undefined}>
+    <li className="summary-row">
       <div className="summary-row__head">
         <Badge tone={row.tone} icon={row.icon}>
           {row.key || row.label}
@@ -29,7 +29,6 @@ function Row({ row, count, total, children }) {
       <div className="summary-row__bar" aria-hidden="true">
         <span className={`summary-row__fill summary-row__fill--${row.tone}`} style={{ width: `${width}%` }} />
       </div>
-      {children}
     </li>
   );
 }
@@ -38,18 +37,24 @@ function Row({ row, count, total, children }) {
 export default function DecisionSummary({ scans }) {
   const total = scans.filter((scan) => ROWS.some((row) => row.key === scan.decision)).length;
   const allowed = scans.filter((scan) => scan.decision === "ALLOW");
+  // The bars stay together; the ALLOW caveat sits below them. data-allow marks the whole card as
+  // the ALLOW badge's caveat container, so the caveat can never be dropped from it.
   return (
-    <ul className="summary-list">
-      {ROWS.map((row) => {
-        const count = scans.filter((scan) => scan.decision === row.key).length;
-        return (
-          <Row key={row.key ?? "none"} row={row} count={count} total={total}>
-            {row.key === "ALLOW" ? (
-              <AllowCaveat confidenceText={confidenceRange(allowed)} layersNote="listed on each scan" />
-            ) : null}
-          </Row>
-        );
-      })}
-    </ul>
+    <div className="decision-summary" data-allow="true">
+      <ul className="summary-list">
+        {ROWS.map((row) => (
+          <Row
+            key={row.key}
+            row={row}
+            count={scans.filter((scan) => scan.decision === row.key).length}
+            total={total}
+          />
+        ))}
+      </ul>
+      <div className="decision-summary__note">
+        <p className="decision-summary__note-title">About the ALLOW decisions above</p>
+        <AllowCaveat confidenceText={confidenceRange(allowed)} layersNote="listed on each scan" />
+      </div>
+    </div>
   );
 }

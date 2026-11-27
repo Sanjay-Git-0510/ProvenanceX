@@ -53,9 +53,14 @@
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
-  background: var(--surface-2);
+  background: var(--surface-1);
   color: var(--text-primary);
   font-size: var(--text-14);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.field__control:hover {
+  border-color: var(--text-tertiary);
 }
 
 .field__control::placeholder {
@@ -109,6 +114,7 @@
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--line-control);
   border-radius: var(--radius-pill);
+  background: var(--surface-1);
   font-size: var(--text-14);
   cursor: pointer;
 }
@@ -278,6 +284,24 @@
   background: var(--status-block);
 }
 
+.decision-summary__note {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+
+.decision-summary__note-title {
+  margin-bottom: var(--space-half);
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+  font-weight: 500;
+}
+
+/* Recent scans: below this width the table scrolls inside its region instead of clipping cells. */
+.recent-scans .table--compact {
+  min-width: 62rem;
+}
+
 .count-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -290,28 +314,11 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-1);
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--count-accent, var(--line-control));
-  border-radius: var(--radius-card-sm);
+  border-radius: 0.75rem;
   background: var(--surface-1);
-  box-shadow: var(--elevation-1);
-}
-
-.count-card--queued {
-  --count-accent: var(--status-unknown);
-}
-
-.count-card--running {
-  --count-accent: var(--accent);
-}
-
-.count-card--completed {
-  --count-accent: var(--status-allow);
-}
-
-.count-card--failed {
-  --count-accent: var(--status-block);
+  box-shadow: var(--elevation-2);
 }
 
 .count-strip__value {
@@ -415,6 +422,19 @@
   text-underline-offset: 2px;
 }
 
+/* Table and artifact links: copper text (3:1 against ink), underline only on hover or focus. */
+.attention-list a,
+.table a {
+  text-decoration: none;
+}
+
+.attention-list a:hover,
+.attention-list a:focus-visible,
+.table a:hover,
+.table a:focus-visible {
+  text-decoration: underline;
+}
+
 .preview-count {
   margin-top: var(--space-1);
 }
@@ -474,13 +494,13 @@
   font-size: var(--text-12);
 }
 
-/* Graph: a solid surface, so labels never sit on glass. */
+/* Graph: a solid off-white surface with white nodes, so labels never sit on glass. */
 .graph-canvas {
   max-height: 32rem;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  background: var(--surface-1);
+  background: var(--surface-0);
 }
 
 .graph-canvas svg {
@@ -506,23 +526,25 @@
 }
 
 .graph-node rect {
-  fill: var(--surface-2);
+  fill: var(--surface-1);
   stroke: var(--line-control);
   stroke-width: 1;
+  transition: fill var(--motion-fast) var(--ease-out);
 }
 
 .graph-node:hover rect {
-  fill: var(--surface-3);
+  fill: var(--surface-2);
 }
 
 .graph-node--root rect {
   stroke: var(--accent);
+  stroke-width: 1.5;
 }
 
 .graph-node--selected rect {
-  fill: var(--surface-3);
+  fill: var(--accent-tint);
   stroke: var(--accent);
-  stroke-width: 3;
+  stroke-width: 2;
 }
 
 .graph-node__label {
@@ -690,7 +712,7 @@
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
-  background: var(--surface-2);
+  background: var(--surface-1);
   font-size: var(--text-14);
   cursor: pointer;
   transition: border-color var(--motion-fast);

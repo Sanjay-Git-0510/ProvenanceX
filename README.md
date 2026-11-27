@@ -104,7 +104,7 @@ npm install
 npm run dev                                   # proxies /api to localhost:8000
 ```
 
-The frontend is dark only. Its design tokens are in `frontend/src/styles/tokens.css`, and a test checks
+The frontend is light only. Its design tokens are in `frontend/src/styles/tokens.css`, and a test checks
 WCAG AA contrast for each colour on its actual background. Onest and IBM Plex Mono (Latin 400 and 500)
 are self-hosted through npm packages, so the app loads nothing from an external CDN. After changing
 frontend dependencies, rebuild the Compose image with `docker compose build frontend`.

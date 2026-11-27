@@ -30,7 +30,7 @@ const columns = [
   {
     key: "artifact",
     header: "Artifact",
-    width: "28%",
+    width: "24%",
     render: (row) => {
       const name = sanitizeDisplay(row.artifact.name);
       return (
@@ -40,14 +40,14 @@ const columns = [
       );
     },
   },
-  { key: "type", header: "Type", width: "11%", render: (row) => humanize(row.artifact.artifact_type) },
-  { key: "status", header: "Status", width: "14%", render: (row) => <ScanStatusBadge status={row.status} /> },
-  { key: "risk", header: "Risk", align: "end", width: "10%", render: (row) => formatRiskScore(row.risk_score) },
+  { key: "type", header: "Type", width: "10%", render: (row) => humanize(row.artifact.artifact_type) },
+  { key: "status", header: "Status", width: "13%", render: (row) => <ScanStatusBadge status={row.status} /> },
+  { key: "risk", header: "Risk", align: "end", width: "15%", render: (row) => formatRiskScore(row.risk_score) },
   { key: "decision", header: "Decision", width: "22%", render: (row) => <RowDecision scan={row} /> },
   {
     key: "created",
     header: "Started",
-    width: "15%",
+    width: "16%",
     render: (row) => <time dateTime={row.created_at} title={formatDateTime(row.created_at)}>{formatRelativeTime(row.created_at)}</time>,
   },
 ];
